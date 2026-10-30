@@ -18,31 +18,32 @@ steps:
 The `id-token` permission lets the workflow prove to Seetrex which repository
 it runs for; there is no account to create and no secret to copy.
 
-## Private by default
+## Private
 
-Your record is **private**: it is stored and anchored, and it is never listed
-anywhere. You can download it and hand it to whoever asks (a customer, an
-auditor) and they verify it offline with the open-source
-[`seetrex-verifier`](https://github.com/seetrex-hq/seetrex-verifier), without
-asking us.
+Your record is **private**: it is stored by Seetrex and never listed anywhere.
+There is no public page and no option to publish it. The job summary shows only
+how much the record grew, never a result: the summary of a job is visible to
+anyone who can see a public repository.
 
-If you want your record listed publicly, opt in:
+Planned, not available yet:
 
-```yaml
-  - uses: seetrex-ai/compliance-action@v1
-    with:
-      publish: true
-```
+- **Download.** You will be able to download your record and hand it to whoever
+  asks (a customer, an auditor), and they will verify it offline with the
+  open-source
+  [`seetrex-verifier`](https://github.com/seetrex-hq/seetrex-verifier), without
+  asking us.
+- **External anchoring.** Records of third-party repositories are not anchored
+  in an external log yet.
 
-A public record carries your repository name and is permanent: you can unlist
-it later (`publish: false`), not delete it.
+The Action works on public GitHub repositories; a private repository is refused.
 
 ## What leaves your repository
 
 Only what is needed to decide: the generated inventory and scan, and the
-attestation files committed in your tree. No source code, no user identity,
-no secrets. Authentication uses the GitHub OIDC token of the workflow run;
-there is nothing to copy or configure.
+attestation files committed in your tree, plus the `owner/repo` name and numeric
+id of the repository, which identify your record. No source code and no secrets.
+Authentication uses the GitHub OIDC token of the workflow run; there is nothing
+to copy or configure.
 
 ## License
 
