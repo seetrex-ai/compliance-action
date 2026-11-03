@@ -1,0 +1,31 @@
+{
+  "repo_slug": "gh-987654321",
+  "appended": 0,
+  "last_ordinal": 0,
+  "quota": "reached",
+  "skipped": [
+    "x_future_category",
+    "Bad Name <b>marker</b>",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "",
+    42,
+    "vuln_scan"
+  ],
+  "results": {
+    "evaluated_at": "2099-07-07T07:07:07Z | <script>marker</script>",
+    "scan_created_at": null,
+    "obligations": [
+      {"ruleset_id": "cra-art13-vulnerability-handling", "status": "current", "version": 1, "outcome": "<img src=x>", "ordinal": 1, "source_commit": null},
+      {"ruleset_id": "cra-art13-third-party|injected", "status": "no_verdict"},
+      {"ruleset_id": "cra-art13-security-updates", "status": "surprise_status", "outcome": "SATISFIED"},
+      {"ruleset_id": "cra-annex1-secure-design", "status": "not_current", "outcome": "LEAKEDTOPLEVEL", "last_verdict": {"version": 1, "outcome": "STALEHISTORY", "ordinal": 1, "source_commit": null}},
+      "not an object"
+    ],
+    "legend": {
+      "current": "Odd legend current, verbatim.",
+      "not_current": "Odd legend not current, verbatim.",
+      "no_verdict": "Odd legend no verdict, verbatim."
+    }
+  },
+  "record": null
+}

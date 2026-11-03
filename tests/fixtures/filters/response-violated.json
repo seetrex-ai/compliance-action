@@ -1,0 +1,51 @@
+{
+  "repo_slug": "gh-987654321",
+  "appended": 2,
+  "last_ordinal": 7,
+  "quota": "ok",
+  "skipped": ["vuln_scan", "sbom_within_tolerance"],
+  "results": {
+    "evaluated_at": "2099-06-06T06:06:06.654321Z",
+    "scan_created_at": "2099-06-05T05:05:05.123456Z",
+    "obligations": [
+      {"ruleset_id": "cra-art13-vulnerability-handling", "status": "current", "version": 1, "outcome": "VIOLATED", "ordinal": 6, "source_commit": "0123456789abcdef0123456789abcdef01234567"},
+      {"ruleset_id": "cra-art13-third-party-components", "status": "not_current", "last_verdict": {"version": 1, "outcome": "STALEHISTORY", "ordinal": 3, "source_commit": "0123456789abcdef0123456789abcdef01234567"}},
+      {"ruleset_id": "cra-art13-security-updates", "status": "current", "version": 2, "outcome": "SATISFIED", "ordinal": 7, "source_commit": null},
+      {"ruleset_id": "cra-annex1-access-data-protection", "status": "no_verdict"},
+      {"ruleset_id": "cra-annex1-availability-resilience", "status": "not_documented"},
+      {"ruleset_id": "cra-annex1-monitoring-lifecycle", "status": "not_documented"},
+      {"ruleset_id": "cra-annex1-secure-config-updates", "status": "current", "version": 1, "outcome": "INDETERMINATE", "ordinal": 5, "source_commit": null},
+      {"ruleset_id": "cra-annex1-secure-design", "status": "not_documented"},
+      {"ruleset_id": "cra-annex1p2-cvd-disclosure", "status": "no_verdict"},
+      {"ruleset_id": "cra-annex1p2-testing-distribution", "status": "not_documented"},
+      {"ruleset_id": "cra-annex2-user-information", "status": "not_documented"}
+    ],
+    "legend": {
+      "current": "The engine's last verdict; at evaluated_at the documents in force are the ones it read and the engine gives the same result over them.",
+      "not_current": "The engine's last verdict, kept as history; it does not stand at evaluated_at: the documents in force are not the ones it read, or the engine no longer gives this result over those same documents.",
+      "no_verdict": "No verdict is on record over the documents in force. This is not a result.",
+      "not_documented": "Not documented: there is no document in force of a kind this obligation reads."
+    }
+  },
+  "record": {
+    "schema": "seetrex.record.v1",
+    "repository_as_told": "example-org/example-repo",
+    "slug": "gh-987654321",
+    "generated_at": "2099-06-06T06:06:06.654321Z",
+    "chain": {"rows": []},
+    "anchor": null,
+    "results": {
+      "evaluated_at": "2099-01-01T00:00:00Z",
+      "scan_created_at": "2099-01-01T00:00:00Z",
+      "obligations": [
+        {"ruleset_id": "cra-record-only-marker", "status": "current", "version": 9, "outcome": "RECORDONLYOUTCOME", "ordinal": 1, "source_commit": null}
+      ],
+      "legend": {
+        "current": "record legend marker current",
+        "not_current": "record legend marker not current",
+        "no_verdict": "record legend marker no verdict",
+        "not_documented": "record legend marker not documented"
+      }
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:00000000-0000-4000-8000-000000000002",
+  "version": 3,
+  "metadata": {
+    "timestamp": "2099-03-03T03:03:03+00:00",
+    "authors": [{"name": "Alice", "email": "alice@example.invalid"}],
+    "tools": {"components": [{"type": "application", "name": "trivy", "version": "0.76.1"}]},
+    "component": {
+      "bom-ref": "subject-ref",
+      "type": "application",
+      "name": "fixture-subject",
+      "author": "Alice <alice@example.invalid>",
+      "properties": [{"name": "aquasecurity:trivy:SchemaVersion", "value": "2"}],
+      "components": [
+        {
+          "bom-ref": "subject-child-ref",
+          "type": "library",
+          "name": "subject-child-fixture",
+          "description": "subject child description marker",
+          "components": [
+            {
+              "bom-ref": "subject-grandchild-ref",
+              "type": "file",
+              "name": "subject-grandchild-fixture",
+              "supplier": {"name": "Alice", "contact": [{"email": "alice@example.invalid"}]}
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "pkg:npm/outer-fixture@2.0.0",
+      "type": "library",
+      "group": "fixture-group",
+      "name": "outer-fixture",
+      "version": "2.0.0",
+      "purl": "pkg:npm/outer-fixture@2.0.0",
+      "cpe": "cpe:2.3:a:fixture:outer-fixture:2.0.0:*:*:*:*:*:*:*",
+      "swid": {"tagId": "fixture-tag", "name": "outer-fixture"},
+      "scope": "required",
+      "hashes": [{"alg": "SHA-256", "content": "0000000000000000000000000000000000000000000000000000000000000000"}],
+      "licenses": [{"license": {"id": "MIT"}}],
+      "author": "Alice <alice@example.invalid>",
+      "publisher": "fixture publisher marker",
+      "copyright": "fixture copyright marker",
+      "externalReferences": [{"type": "website", "url": "https://example.invalid/outer"}],
+      "properties": [{"name": "aquasecurity:trivy:PkgType", "value": "npm"}],
+      "evidence": {"occurrences": [{"location": "/home/alice/work/package-lock.json"}]},
+      "components": [
+        {
+          "bom-ref": "pkg:npm/inner-fixture@1.1.0",
+          "type": "library",
+          "name": "inner-fixture",
+          "version": "1.1.0",
+          "properties": [{"name": "aquasecurity:trivy:PkgType", "value": "npm"}],
+          "components": [
+            {
+              "bom-ref": "pkg:npm/innermost-fixture@0.0.1",
+              "type": "library",
+              "name": "innermost-fixture",
+              "version": "0.0.1",
+              "author": "Alice <alice@example.invalid>"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "bom-ref": "pkg:npm/no-children-fixture@3.0.0",
+      "type": "library",
+      "name": "no-children-fixture",
+      "version": "3.0.0",
+      "purl": "pkg:npm/no-children-fixture@3.0.0"
+    }
+  ],
+  "dependencies": [
+    {"ref": "subject-ref", "dependsOn": ["pkg:npm/outer-fixture@2.0.0", "pkg:npm/no-children-fixture@3.0.0"]},
+    {"ref": "pkg:npm/outer-fixture@2.0.0", "dependsOn": ["pkg:npm/inner-fixture@1.1.0"]},
+    {"ref": "pkg:npm/inner-fixture@1.1.0", "dependsOn": ["pkg:npm/innermost-fixture@0.0.1"]},
+    {"ref": "pkg:npm/innermost-fixture@0.0.1", "dependsOn": []},
+    {"ref": "pkg:npm/no-children-fixture@3.0.0"}
+  ],
+  "vulnerabilities": [
+    {"bom-ref": "vuln-1", "id": "CVE-2099-0001", "affects": [{"ref": "pkg:npm/outer-fixture@2.0.0"}]}
+  ],
+  "properties": [{"name": "fixture:root-property", "value": "root property marker"}],
+  "annotations": [{"text": "annotation marker", "annotator": {"individual": {"email": "alice@example.invalid"}}}]
+}

@@ -1,0 +1,17 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:00000000-0000-4000-8000-000000000003",
+  "metadata": {
+    "timestamp": "2099-04-04T04:04:04+00:00",
+    "authors": [{"name": "Alice", "email": "alice@example.invalid"}]
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "lonely-fixture",
+      "version": "9.9.9",
+      "components": []
+    }
+  ]
+}

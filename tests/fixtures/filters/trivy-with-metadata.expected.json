@@ -1,0 +1,33 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2099-05-05T05:05:05.123456789+02:00",
+  "Results": [
+    {
+      "Target": "package-lock.json",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2099-0001",
+          "PkgName": "left-pad-fixture",
+          "Severity": "HIGH",
+          "PublishedDate": "2099-01-01T00:00:00Z",
+          "FixedVersion": "1.0.1"
+        },
+        {
+          "VulnerabilityID": "GHSA-2222-3333-4444",
+          "PkgName": "left-pad-fixture",
+          "Severity": "LOW",
+          "PublishedDate": null,
+          "FixedVersion": null
+        }
+      ]
+    },
+    {
+      "Target": "go.sum",
+      "Vulnerabilities": []
+    },
+    {
+      "Target": null,
+      "Vulnerabilities": []
+    }
+  ]
+}

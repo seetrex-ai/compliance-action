@@ -1,0 +1,59 @@
+{
+  "SchemaVersion": 2,
+  "CreatedAt": "2099-05-05T05:05:05.123456789+02:00",
+  "ArtifactName": "/home/alice/work/fixture-repo",
+  "ArtifactType": "repository",
+  "Metadata": {
+    "RepoURL": "https://example.invalid/alice/fixture-repo.git",
+    "Branch": "main",
+    "Commit": "0123456789abcdef0123456789abcdef01234567",
+    "CommitMsg": "fixture commit message marker-7c1e",
+    "Author": "Alice <alice@example.invalid>",
+    "Committer": "Alice <alice@example.invalid>",
+    "ImageConfig": {"architecture": "", "os": ""}
+  },
+  "Results": [
+    {
+      "Target": "package-lock.json",
+      "Class": "lang-pkgs",
+      "Type": "npm",
+      "Packages": [{"Name": "left-pad-fixture", "Version": "1.0.0", "Licenses": ["MIT"]}],
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2099-0001",
+          "PkgID": "left-pad-fixture@1.0.0",
+          "PkgName": "left-pad-fixture",
+          "PkgPath": "/home/alice/work/fixture-repo/node_modules/left-pad-fixture",
+          "InstalledVersion": "1.0.0",
+          "FixedVersion": "1.0.1",
+          "Status": "fixed",
+          "SeveritySource": "ghsa",
+          "PrimaryURL": "https://example.invalid/CVE-2099-0001",
+          "DataSource": {"ID": "ghsa", "Name": "fixture", "URL": "https://example.invalid/"},
+          "Title": "Synthetic fixture vulnerability",
+          "Description": "Synthetic description marker; contact alice@example.invalid.",
+          "Severity": "HIGH",
+          "CweIDs": ["CWE-0"],
+          "CVSS": {"ghsa": {"V3Score": 7.5}},
+          "References": ["https://example.invalid/ref"],
+          "PublishedDate": "2099-01-01T00:00:00Z",
+          "LastModifiedDate": "2099-01-02T00:00:00Z"
+        },
+        {
+          "VulnerabilityID": "GHSA-2222-3333-4444",
+          "PkgName": "left-pad-fixture",
+          "Severity": "LOW"
+        }
+      ]
+    },
+    {
+      "Target": "go.sum",
+      "Class": "lang-pkgs",
+      "Type": "gomod",
+      "Vulnerabilities": null
+    },
+    {
+      "Class": "secret"
+    }
+  ]
+}
