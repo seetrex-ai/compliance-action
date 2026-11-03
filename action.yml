@@ -1,0 +1,65 @@
+name: Seetrex Compliance
+description: Records every push to the default branch of a private repository against the Cyber Resilience Act catalogue, in Seetrex.
+author: Seetrex
+
+inputs:
+  dry-run:
+    description: Scan and describe what would be sent (files, sizes, sha256), without requesting a token or sending anything.
+    required: false
+    default: 'false'
+  summary:
+    description: "What the job summary shows after a successful push: full (the result of each obligation) or counters (only how much the record grew)."
+    required: false
+    default: full
+  strict:
+    description: Fail the job when Seetrex is unavailable, rate limits the run or the quota is reached (by default these only warn).
+    required: false
+    default: 'false'
+  request-repin:
+    description: Ask Seetrex to register the current default branch for this repository (after renaming it). Sends no documents.
+    required: false
+    default: 'false'
+  request-close:
+    description: Ask Seetrex to close the record of this repository. Sends no documents.
+    required: false
+    default: 'false'
+
+outputs:
+  record:
+    description: Path of the record file written after a successful push, if Seetrex returned one.
+    value: ${{ steps.seetrex.outputs.record }}
+
+runs:
+  using: composite
+  steps:
+    - name: Cache the Trivy vulnerability database
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: ${{ runner.temp }}/seetrex-trivy-cache
+        key: seetrex-trivy-db-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
+        restore-keys: |
+          seetrex-trivy-db-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Seetrex Compliance
+      id: seetrex
+      shell: bash
+      env:
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
+        INPUT_SUMMARY: ${{ inputs.summary }}
+        INPUT_STRICT: ${{ inputs.strict }}
+        INPUT_REQUEST_REPIN: ${{ inputs.request-repin }}
+        INPUT_REQUEST_CLOSE: ${{ inputs.request-close }}
+      run: bash "$GITHUB_ACTION_PATH/bin/run.sh"
+
+    - name: Upload the Seetrex record
+      if: always() && steps.seetrex.outputs.record != ''
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: seetrex-record
+        path: ${{ steps.seetrex.outputs.record }}
+        if-no-files-found: error
+
+    - name: Remove the Seetrex output directory
+      if: always()
+      shell: bash
+      run: rm -rf -- "$RUNNER_TEMP/seetrex-out"
