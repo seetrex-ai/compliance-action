@@ -1,0 +1,9 @@
+{
+  "error": "bad_request",
+  "results": {
+    "scan_created_at": "2099-02-28T23:59:59Z",
+    "obligations": [{"ruleset_id": "cra-fixture-sbom", "status": "current", "outcome": "VIOLATED"}],
+    "legend": "Fixture legend."
+  },
+  "record": {"format": "seetrex.record.v1", "slug": "gh-987654321", "entries": []}
+}
