@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Test shim for `sleep`: never waits; appends its arguments as one line to
+# $SEETREX_TEST_SHIM_DIR/sleep.log (format in tests/lib.sh).
+set -euo pipefail
+
+state="${SEETREX_TEST_SHIM_DIR:-}"
+if [ -z "$state" ] || [ ! -d "$state" ]; then
+  printf 'sleep shim: SEETREX_TEST_SHIM_DIR is not set or missing\n' >&2
+  exit 2
+fi
+printf '%s\n' "$*" >> "$state/sleep.log"

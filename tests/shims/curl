@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# Test shim for `curl`. Never touches the network. State lives in
+# $SEETREX_TEST_SHIM_DIR (set by setup_case in tests/lib.sh); log formats and
+# the helpers that read them are documented at the top of tests/lib.sh.
+#
+# Served URLs:
+#   https://github.com/aquasecurity/trivy/releases/download/...
+#       -> $STATE/download/file (the case's fake Trivy tarball), status
+#          $STATE/download/status (default 200)
+#   <prefix in $STATE/token_url_prefix>...
+#       -> $STATE/token/body (default {"value":"<fake jwt>"}), status
+#          $STATE/token/status (default 200)
+#   https://api.seetrex.com/...
+#       -> next entry of the queue filled by set_api_response /
+#          set_api_transport_error; the last entry repeats once the queue is
+#          exhausted; an empty queue is a transport error (exit 7)
+#   anything else
+#       -> "Could not resolve host", exit 6
+set -euo pipefail
+
+state="${SEETREX_TEST_SHIM_DIR:-}"
+if [ -z "$state" ] || [ ! -d "$state" ]; then
+  printf 'curl shim: SEETREX_TEST_SHIM_DIR is not set or missing; refusing to run\n' >&2
+  exit 2
+fi
+
+mkdir -p "$state/curl"
+count=0
+if [ -f "$state/curl/count" ]; then
+  count="$(cat "$state/curl/count")"
+fi
+n=$((count + 1))
+printf '%s\n' "$n" > "$state/curl/count"
+call="$state/curl/$n"
+mkdir -p "$call"
+
+: > "$call/argv"
+for a in "$@"; do
+  printf '%s\n' "$a" >> "$call/argv"
+done
+: > "$call/headers"
+: > "$call/body"
+
+die() {
+  printf 'curl shim: %s\n' "$1" >&2
+  printf '%s\n' "$1" > "$call/shim_error"
+  printf '%s SHIM-ERROR %s\n' "$n" "$1" >> "$state/curl.log"
+  exit 2
+}
+
+url=""
+method=""
+out=""
+writeout=""
+dump=""
+fail=0
+fail_with_body=0
+has_data=0
+
+add_header() {
+  local h="$1" line
+  if [ "${h:0:1}" = "@" ]; then
+    local f="${h:1}"
+    [ -f "$f" ] || die "header file not found: $f"
+    while IFS= read -r line || [ -n "$line" ]; do
+      line="${line%$'\r'}"
+      [ -n "$line" ] && printf '%s\n' "$line" >> "$call/headers"
+    done < "$f"
+  else
+    printf '%s\n' "$h" >> "$call/headers"
+  fi
+}
+
+add_data() {
+  local d="$1"
+  if [ "$has_data" = 1 ]; then
+    printf '&' >> "$call/body"
+  fi
+  has_data=1
+  if [ "$d" = "@-" ]; then
+    cat >> "$call/body"
+  elif [ "${d:0:1}" = "@" ]; then
+    [ -f "${d:1}" ] || die "data file not found: ${d:1}"
+    cat "${d:1}" >> "$call/body"
+  else
+    printf '%s' "$d" >> "$call/body"
+  fi
+}
+
+set_url() {
+  [ -z "$url" ] || die "more than one URL: '$url' and '$1'"
+  url="$1"
+}
+
+# Apply one option that takes a value.
+apply_valued() {
+  local opt="$1" val="$2"
+  case "$opt" in
+    -o|--output) out="$val" ;;
+    -H|--header) add_header "$val" ;;
+    -d|--data|--data-binary|--data-raw|--data-ascii) add_data "$val" ;;
+    --json) add_data "$val"; printf 'Content-Type: application/json\n' >> "$call/headers" ;;
+    -w|--write-out) writeout="$val" ;;
+    -X|--request) method="$val" ;;
+    -D|--dump-header) dump="$val" ;;
+    --url) set_url "$val" ;;
+    -u|--user) printf 'user %s\n' "$val" > "$call/user" ;;
+    -A|--user-agent) printf 'User-Agent: %s\n' "$val" >> "$call/headers" ;;
+    -e|--referer) printf 'Referer: %s\n' "$val" >> "$call/headers" ;;
+    -K|--config|-T|--upload-file|-F|--form) die "unsupported option $opt" ;;
+    *) : ;;  # timeouts, retries, --proto, proxies...: logged in argv only
+  esac
+}
+
+valued_opts=' -o --output -H --header -d --data --data-binary --data-raw --data-ascii --json -w --write-out -X --request -D --dump-header --url -u --user -A --user-agent -e --referer -K --config -T --upload-file -F --form -m --max-time --connect-timeout --retry --retry-delay --retry-max-time --proto --proto-redir -x --proxy --noproxy --resolve --connect-to --cacert --capath -b --cookie -c --cookie-jar --limit-rate '
+
+while [ $# -gt 0 ]; do
+  a="$1"
+  case "$a" in
+    --fail|-f) fail=1; shift ;;
+    --fail-with-body) fail=1; fail_with_body=1; shift ;;
+    --*=*)
+      apply_valued "${a%%=*}" "${a#*=}"
+      shift
+      ;;
+    -*)
+      if [[ "$valued_opts" == *" $a "* ]]; then
+        [ $# -ge 2 ] || die "$a needs a value"
+        apply_valued "$a" "$2"
+        shift 2
+      elif [[ "$a" == --* ]]; then
+        shift  # boolean long flag (--silent, --show-error, --location, ...)
+      else
+        # bundle of boolean short flags, e.g. -fsSL; a valued short option
+        # must stand alone
+        bundle="${a:1}"
+        for ((i = 0; i < ${#bundle}; i++)); do
+          c="${bundle:i:1}"
+          case "$c" in
+            f) fail=1 ;;
+            o|H|d|w|X|D|u|A|e|K|T|F|m|x|b|c) die "valued option -$c inside bundle $a" ;;
+            *) : ;;
+          esac
+        done
+        shift
+      fi
+      ;;
+    *)
+      set_url "$a"
+      shift
+      ;;
+  esac
+done
+
+[ -n "$url" ] || die "no URL"
+if [ -z "$method" ]; then
+  if [ "$has_data" = 1 ]; then method=POST; else method=GET; fi
+fi
+printf '%s\n' "$url" > "$call/url"
+printf '%s\n' "$method" > "$call/method"
+
+status=""
+rc=0
+body_src=""
+resp_headers=""
+token_prefix=""
+if [ -f "$state/token_url_prefix" ]; then
+  token_prefix="$(cat "$state/token_url_prefix")"
+fi
+
+case "$url" in
+  https://github.com/aquasecurity/trivy/releases/download/*)
+    status=200
+    [ -f "$state/download/status" ] && status="$(cat "$state/download/status")"
+    body_src="$state/download/file"
+    ;;
+  https://api.seetrex.com/*)
+    qn=0
+    [ -f "$state/api/queued" ] && qn="$(cat "$state/api/queued")"
+    if [ "$qn" -eq 0 ]; then
+      status=000
+      rc=7
+    else
+      served=0
+      [ -f "$state/api/served" ] && served="$(cat "$state/api/served")"
+      idx=$((served + 1))
+      [ "$idx" -gt "$qn" ] && idx="$qn"
+      printf '%s\n' "$((served + 1))" > "$state/api/served"
+      status="$(cat "$state/api/$idx.status")"
+      if [ "$status" = "000" ]; then
+        rc="$(cat "$state/api/$idx.exit")"
+      else
+        body_src="$state/api/$idx.body"
+        [ -f "$state/api/$idx.headers" ] && resp_headers="$state/api/$idx.headers"
+      fi
+    fi
+    ;;
+  *)
+    if [ -n "$token_prefix" ] && [ "${url:0:${#token_prefix}}" = "$token_prefix" ]; then
+      status=200
+      [ -f "$state/token/status" ] && status="$(cat "$state/token/status")"
+      body_src="$state/token/body"
+    else
+      status=000
+      rc=6
+    fi
+    ;;
+esac
+
+printf '%s\n' "$status" > "$call/status"
+
+emit_writeout() {
+  if [ -n "$writeout" ]; then
+    local w="$writeout"
+    w="${w//'%{http_code}'/$status}"
+    w="${w//'%{response_code}'/$status}"
+    w="${w//'\n'/$'\n'}"
+    printf '%s' "$w"
+  fi
+}
+
+if [ "$status" = "000" ]; then
+  case "$rc" in
+    6) printf 'curl: (6) Could not resolve host: %s\n' "$url" >&2 ;;
+    28) printf 'curl: (28) Operation timed out\n' >&2 ;;
+    *) printf 'curl: (%s) Failed to connect\n' "$rc" >&2 ;;
+  esac
+  emit_writeout
+  printf '%s\n' "$rc" > "$call/exit"
+  printf '%s %s %s -> 000 exit=%s\n' "$n" "$method" "$url" "$rc" >> "$state/curl.log"
+  exit "$rc"
+fi
+
+if [ -n "$dump" ]; then
+  {
+    printf 'HTTP/2 %s\n' "$status"
+    if [ -n "$resp_headers" ]; then cat "$resp_headers"; fi
+  } > "$dump"
+fi
+
+write_body=1
+if [ "$fail" = 1 ] && [ "$status" -ge 400 ] && [ "$fail_with_body" = 0 ]; then
+  write_body=0
+fi
+if [ "$write_body" = 1 ]; then
+  [ -f "$body_src" ] || die "no body configured for $url"
+  if [ -n "$out" ]; then
+    cat "$body_src" > "$out"
+  else
+    cat "$body_src"
+  fi
+fi
+emit_writeout
+
+if [ "$fail" = 1 ] && [ "$status" -ge 400 ]; then
+  printf 'curl: (22) The requested URL returned error: %s\n' "$status" >&2
+  rc=22
+fi
+printf '%s\n' "$rc" > "$call/exit"
+printf '%s %s %s -> %s exit=%s\n' "$n" "$method" "$url" "$status" "$rc" >> "$state/curl.log"
+exit "$rc"

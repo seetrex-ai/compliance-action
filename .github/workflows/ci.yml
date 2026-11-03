@@ -1,0 +1,73 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: shellcheck
+        shell: bash
+        run: |
+          shellcheck --version
+          find bin tests -type f \( -name '*.sh' -o -path 'tests/shims/*' \) -exec shellcheck {} +
+
+      - name: tests
+        shell: bash
+        run: |
+          jq --version
+          rc=0
+          bash tests/run_all.sh > "$RUNNER_TEMP/t.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/t.log"
+          exit "$rc"
+
+  trivy-pin:
+    # The only job with network: downloads the pinned Trivy release from
+    # github.com and checks it against bin/trivy.pin and the release's own
+    # checksums file. Non-blocking for now: whether it gates is for the
+    # reviewers to decide (plan §4).
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: download and check the pinned Trivy
+        shell: bash
+        run: |
+          pin=bin/trivy.pin
+          v="$(sed -n 's/^TRIVY_VERSION=\([0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}\)$/\1/p' "$pin")"
+          sha_64="$(sed -n 's/^TRIVY_SHA256_LINUX_64BIT=\([0-9a-f]\{64\}\)$/\1/p' "$pin")"
+          sha_arm="$(sed -n 's/^TRIVY_SHA256_LINUX_ARM64=\([0-9a-f]\{64\}\)$/\1/p' "$pin")"
+          if [ -z "$v" ] || [ -z "$sha_64" ] || [ -z "$sha_arm" ]; then
+            echo "bin/trivy.pin is malformed"
+            exit 1
+          fi
+          if [ "$v" = "0.69.4" ]; then
+            echo "Trivy 0.69.4 is the hijacked release"
+            exit 1
+          fi
+          base="https://github.com/aquasecurity/trivy/releases/download/v${v}"
+          dir="$RUNNER_TEMP/trivy-pin"
+          mkdir -p "$dir"
+          f64="trivy_${v}_Linux-64bit.tar.gz"
+          farm="trivy_${v}_Linux-ARM64.tar.gz"
+          sums="trivy_${v}_checksums.txt"
+          for f in "$f64" "$farm" "$sums"; do
+            curl -fsSL --proto '=https' --max-time 300 -o "$dir/$f" "$base/$f"
+          done
+          printf '%s  %s\n%s  %s\n' "$sha_64" "$f64" "$sha_arm" "$farm" > "$dir/pinned.sha256"
+          ( cd "$dir" && sha256sum -c pinned.sha256 )
+          grep -qxF "$sha_64  $f64" "$dir/$sums"
+          grep -qxF "$sha_arm  $farm" "$dir/$sums"
+          echo "Trivy v${v}: both pinned sha256 match the downloads and the release checksums file"
