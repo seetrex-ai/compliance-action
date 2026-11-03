@@ -15,8 +15,10 @@
 #   trivy_left_out: true (the vulnerability report is left out)
 #   attestations: <K> documents, <N> bytes
 #   repin: true (control request) / close: true (control request)
-# File names, file sizes and sha256 are run.sh's (jq cannot hash). It NEVER
-# looks inside a document: no count of components, vulnerabilities,
+# File names, file sizes and sha256 are run.sh's (jq cannot hash), and so are
+# the two counts step 15 asks for (SBOM components, vulnerability report
+# entries): run.sh measures them on the reduced files it built. This filter
+# NEVER looks inside a document: no count of components, vulnerabilities,
 # severities or packages, no name, no content. A key outside the declared
 # ones is not echoed (one fixed line instead), nor is a value of an
 # unexpected type.

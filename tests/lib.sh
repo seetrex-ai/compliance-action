@@ -95,7 +95,8 @@
 #   fake_trivy_sha             prints the sha256 of this case's fake tarball
 #   set_trivy_fixture <json|cyclonedx> <file>
 #                              what the fake trivy writes for that --format;
-#                              the token @CWD@ is replaced by its cwd
+#                              the token @CWD@ is replaced by its cwd and
+#                              @SCANARG@ by its last argument (the scan path)
 #   set_trivy_exit <code>      the fake trivy exits <code> without output
 #   set_download_file <file>   the shim serves <file> for the Trivy URL
 #   set_download_status <code> HTTP status of the Trivy download (default 200)

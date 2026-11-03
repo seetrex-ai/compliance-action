@@ -66,6 +66,13 @@ _reduced_trivy_bytes() {
   _file_bytes "$CASE_DIR/reduced.canonical"
 }
 
+# Compact size (no newline) of a raw SBOM after bin/filters/sbom.jq: a lower
+# bound of its string in the body (escaping only adds bytes).
+_reduced_sbom_bytes() {
+  jq -c -f "$ACTION_COPY/bin/filters/sbom.jq" < "$1" | tr -d '\r\n' > "$CASE_DIR/reduced-sbom.json"
+  _file_bytes "$CASE_DIR/reduced-sbom.json"
+}
+
 _assert_no_digits() {
   local hit
   hit="$(grep -n '[0-9]' "$1" || true)"
@@ -288,7 +295,20 @@ test_intent_dry_run_contacts_no_seetrex_endpoint_and_no_oidc() {
   assert_eq 0 "$(token_call_count)" "no OIDC token"
   assert_eq 0 "$(api_call_count)" "no Seetrex call"
   if ! trivy_ran; then fail "dry-run did not scan"; fi
-  assert_file_contains "$RUN_STDOUT" "sha256" "the dry-run report lists sha256"
+  # What the report shows (plan §3 step 15): files with size and sha256 as
+  # they would be sent, the body keys, and the component and vulnerability
+  # counts of the default fixtures (1 component, 2 report entries).
+  local sbom_str
+  sbom_str="$CASE_DIR/expected-sbom"
+  jq -c -f "$ACTION_COPY/bin/filters/sbom.jq" < "$FIXTURES_COMMON/sbom.cdx.json" | tr -d '\r\n' > "$sbom_str"
+  assert_line_eq "$RUN_STDOUT" "- sbom: $(_file_bytes "$sbom_str") bytes, sha256 $(sha256sum < "$sbom_str" | cut -d' ' -f1)" \
+    "the dry-run report lists the sbom with its size and sha256"
+  assert_file_contains "$RUN_STDOUT" "- trivy: " "the dry-run report lists the report file"
+  assert_file_contains "$RUN_STDOUT" "- request body: " "the dry-run report lists the body"
+  assert_line_eq "$RUN_STDOUT" "Body keys: sbom, trivy" "the dry-run report lists the body keys"
+  assert_line_eq "$RUN_STDOUT" "- SBOM components (every level): 1" "component count"
+  assert_line_eq "$RUN_STDOUT" "- vulnerability report entries: 2" "vulnerability count"
+  assert_file_contains "$GITHUB_STEP_SUMMARY" "Body keys: sbom, trivy" "the report is in the summary too"
   _assert_no_record "dry-run"
 
   unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
@@ -392,20 +412,20 @@ test_intent_body_contains_only_declared_fields() {
   assert_json "$body" '(.attestations | type) == "array" and all(.attestations[]; type == "string")' "attestations are strings"
   assert_json "$body" 'has("trivy_left_out") | not' "no trivy_left_out when the report is sent"
   rc=0
-  jq -e -f "$ACTION_COPY/bin/filters/body_check.jq" "$body" > /dev/null 2>&1 || rc=$?
+  jq -n -e -f "$ACTION_COPY/bin/filters/body_check.jq" < "$body" > /dev/null 2>&1 || rc=$?
   assert_eq 0 "$rc" "body_check accepts the real body"
 
   jq -c '. + {extra: 1}' "$body" > "$CASE_DIR/extra.json"
   rc=0
-  jq -e -f "$ACTION_COPY/bin/filters/body_check.jq" "$CASE_DIR/extra.json" > /dev/null 2>&1 || rc=$?
+  jq -n -e -f "$ACTION_COPY/bin/filters/body_check.jq" < "$CASE_DIR/extra.json" > /dev/null 2>&1 || rc=$?
   assert_ne 0 "$rc" "body_check refuses an extra key"
   jq -c '. + {trivy_left_out: true}' "$body" > "$CASE_DIR/both.json"
   rc=0
-  jq -e -f "$ACTION_COPY/bin/filters/body_check.jq" "$CASE_DIR/both.json" > /dev/null 2>&1 || rc=$?
+  jq -n -e -f "$ACTION_COPY/bin/filters/body_check.jq" < "$CASE_DIR/both.json" > /dev/null 2>&1 || rc=$?
   assert_ne 0 "$rc" "body_check refuses trivy with trivy_left_out"
   jq -c 'del(.trivy) + {trivy_left_out: false}' "$body" > "$CASE_DIR/false.json"
   rc=0
-  jq -e -f "$ACTION_COPY/bin/filters/body_check.jq" "$CASE_DIR/false.json" > /dev/null 2>&1 || rc=$?
+  jq -n -e -f "$ACTION_COPY/bin/filters/body_check.jq" < "$CASE_DIR/false.json" > /dev/null 2>&1 || rc=$?
   assert_ne 0 "$rc" "body_check refuses trivy_left_out: false"
 
   # Left out: trivy_left_out is true and trivy is absent.
@@ -449,6 +469,13 @@ test_intent_scan_that_does_not_fit_is_left_out_before_sending() {
   size="$(_reduced_trivy_bytes "$CASE_DIR/trivy-b.json")"
   [ "$size" -le 1048576 ] || fail "(b) report must fit its own cap: $size"
   _big_sbom 2400 "$CASE_DIR/sbom-b.json"
+  # Measured with the real filters: the two reduced documents together
+  # exceed the body cap (a lower bound of the body with the report), while
+  # the SBOM alone leaves room for escaping and the attestations list.
+  local sbom_size
+  sbom_size="$(_reduced_sbom_bytes "$CASE_DIR/sbom-b.json")"
+  [ $((sbom_size + size)) -gt 3145728 ] || fail "(b) with the report the body would fit: $sbom_size + $size"
+  [ "$sbom_size" -le 2621440 ] || fail "(b) the SBOM alone is too close to the cap: $sbom_size"
   set_trivy_fixture json "$CASE_DIR/trivy-b.json"
   set_trivy_fixture cyclonedx "$CASE_DIR/sbom-b.json"
   set_api_response 200 "$FIXTURES_RUN/resp-200.json"
@@ -464,6 +491,8 @@ test_intent_scan_that_does_not_fit_is_left_out_before_sending() {
   # (c) the SBOM alone does not fit.
   setup_case
   _big_sbom 3400 "$CASE_DIR/sbom-c.json"
+  sbom_size="$(_reduced_sbom_bytes "$CASE_DIR/sbom-c.json")"
+  [ "$sbom_size" -gt 3145728 ] || fail "(c) the reduced SBOM alone fits: $sbom_size"
   set_trivy_fixture cyclonedx "$CASE_DIR/sbom-c.json"
   set_api_response 200 "$FIXTURES_RUN/resp-200.json"
   run_action
@@ -475,38 +504,40 @@ test_intent_scan_that_does_not_fit_is_left_out_before_sending() {
 
 test_intent_sbom_subject_name_does_not_depend_on_workdir() {
   # INTENT: Trivy scans `.` from the workspace, so the runner's path never
-  # names the subject; two workspaces at different paths send the same sbom.
-  # CONTEXT: plan D1 §3 step 10 (finding 4 of M1).
+  # names the subject; two workspaces at different paths send byte-identical
+  # sbom strings.
+  # CONTEXT: plan D1 §3 step 10 (finding 4 of M1): real Trivy names the SBOM
+  # subject (metadata.component.name) after its path argument. The fake Trivy
+  # models that: @SCANARG@ in the fixture becomes its path argument, so a run
+  # that scanned "$GITHUB_WORKSPACE" instead of `.` would send the path.
   # EXPIRES IF: the Action stops scanning the workspace with Trivy.
-  # LIMIT: the fake Trivy substitutes its cwd (not its path argument) for
-  # @CWD@, so it cannot model "real Trivy names the subject after the path
-  # argument"; the argv/cwd checks below carry that half.
-  local first_ws n args
-  setup_case
-  first_ws="$WS"
-  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
-  run_action
-  assert_rc 0
-  jq -r '.sbom' "$(_last_api_body)" > "$TEST_TMP/sbom-1"
-  for n in 1 2; do
-    args="$(trivy_args "$n")"
-    assert_eq "." "$(printf '%s\n' "$args" | tail -n 1)" "case 1, scan $n: the path argument is ."
-    assert_not_contains "$args" "$WS" "case 1, scan $n: the workspace path is not an argument"
-    assert_eq "$WS" "$(trivy_cwd "$n")" "case 1, scan $n: runs in the workspace"
+  local first_ws case n args
+  jq '.metadata.component.name = "@SCANARG@"' "$FIXTURES_COMMON/sbom.cdx.json" \
+    > "$TEST_TMP/sbom-scanarg.cdx.json"
+  for case in 1 2; do
+    setup_case
+    if [ "$case" = 1 ]; then
+      first_ws="$WS"
+    else
+      assert_ne "$first_ws" "$WS" "two different workspaces"
+    fi
+    set_trivy_fixture cyclonedx "$TEST_TMP/sbom-scanarg.cdx.json"
+    set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+    run_action
+    assert_rc 0
+    jq -j '.sbom' "$(_last_api_body)" > "$TEST_TMP/sbom-$case"
+    assert_json "$TEST_TMP/sbom-$case" '.metadata.component.name == "."' \
+      "case $case: the subject is named after the path argument ."
+    assert_file_not_contains "$TEST_TMP/sbom-$case" "$WS" "case $case: the workspace path is in the sbom"
+    for n in 1 2; do
+      args="$(trivy_args "$n")"
+      assert_eq "." "$(printf '%s\n' "$args" | tail -n 1)" "case $case, scan $n: the path argument is ."
+      assert_not_contains "$args" "$WS" "case $case, scan $n: the workspace path is not an argument"
+      assert_eq "$WS" "$(trivy_cwd "$n")" "case $case, scan $n: runs in the workspace"
+    done
   done
-
-  setup_case
-  assert_ne "$first_ws" "$WS" "two different workspaces"
-  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
-  run_action
-  assert_rc 0
-  jq -r '.sbom' "$(_last_api_body)" > "$TEST_TMP/sbom-2"
-  for n in 1 2; do
-    args="$(trivy_args "$n")"
-    assert_eq "." "$(printf '%s\n' "$args" | tail -n 1)" "case 2, scan $n: the path argument is ."
-    assert_not_contains "$args" "$WS" "case 2, scan $n: the workspace path is not an argument"
-  done
-  assert_eq "$(cat "$TEST_TMP/sbom-1")" "$(cat "$TEST_TMP/sbom-2")" "same sbom from both workspaces"
+  assert_eq "$(sha256sum < "$TEST_TMP/sbom-1")" "$(sha256sum < "$TEST_TMP/sbom-2")" \
+    "byte-identical sbom from both workspaces"
 }
 
 test_intent_401_on_default_ref_prints_the_fixed_line() {

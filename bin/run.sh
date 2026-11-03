@@ -10,21 +10,22 @@
 #
 # Filters (bin/filters/, all called with -f, input from a file or stdin):
 #   sbom.jq, trivy.jq        raw document on stdin -> reduced document (-c)
-#   body_check.jq            `jq -e` over the body file: exit 0 iff acceptable
+#   body_check.jq            `jq -n -e` with the body file on stdin (the
+#                            filter reads its input itself, so a file with
+#                            two JSON values is refused): exit 0 iff the
+#                            document push may be sent. Control literals
+#                            never pass through it.
 #   summary_full.jq,
-#   summary_counters.jq      the 200 response file -> markdown (-r)
-#   dry_run.jq               the dry-run description file -> markdown (-r).
-#     Its input, built below (write_dry_run_input), is one JSON object:
-#       {"mode": "push",
-#        "body": {"bytes": N, "sha256": "<64 hex>", "keys": ["sbom", ...]},
-#        "files": [{"name": "sbom"|"trivy"|"attestation-<i>",
-#                   "bytes": N, "sha256": "<64 hex>"}, ...],
-#        "counts": {"attestations": N, "components": N, "vulnerabilities": N},
-#        "trivy_left_out": true|false}
-#     "files" describes each string exactly as it would be sent in the body;
-#     "components" counts SBOM components at every nesting level;
-#     "vulnerabilities" counts the reduced report's entries (also when it is
-#     left out). No names, paths or identifiers of findings.
+#   summary_counters.jq      the 200 response file -> markdown (-r); each
+#                            prints its own "## Seetrex Compliance" header
+#   dry_run.jq               the body file (push or control) -> plain lines
+#                            (-r): body keys, string sizes, attestation count;
+#                            it never looks inside a document.
+#   The rest of a dry run (plan §3 step 15) is run.sh's own (jq cannot hash):
+#   each file as sent (name, bytes, sha256), the whole body (bytes, sha256),
+#   and the number of SBOM components (every nesting level) and of entries of
+#   the reduced vulnerability report (also when it is left out). No name,
+#   identifier or package of a finding is ever printed.
 # A missing filter stops the run before anything is downloaded or sent.
 set -euo pipefail
 umask 077
@@ -301,6 +302,14 @@ if [ "$REPIN" = true ] || [ "$CLOSE" = true ]; then
   fi
   printf '{"%s":true}' "$what" > "$WORK/body.json"
   if [ "$DRY_RUN" = true ]; then
+    if [ -f "$FILTERS/dry_run.jq" ]; then
+      jq -r -f "$FILTERS/dry_run.jq" < "$WORK/body.json" > "$WORK/dry.md" \
+        || die "The dry-run report could not be rendered."
+      cat "$WORK/dry.md"
+      if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+        cat "$WORK/dry.md" >> "$GITHUB_STEP_SUMMARY"
+      fi
+    fi
     say "Dry run: a $what request would be sent to Seetrex, with no documents. Nothing was sent."
     exit 0
   fi
@@ -408,6 +417,7 @@ while IFS= read -r -d '' entry; do
     die "More than $MAX_ATTESTATIONS attestation files are committed in .seetrex/attestations/: nothing was sent."
   fi
   git -C "$GITHUB_WORKSPACE" cat-file blob "$oid" > "$WORK/att/$n_att.json"
+  printf '%s' "$path" > "$WORK/att/$n_att.path"
 done < "$WORK/att.tree"
 : > "$WORK/att.jsonl"
 for ((i = 1; i <= n_att; i++)); do
@@ -450,48 +460,55 @@ if [ "$left_out" = true ]; then
     die "$L_TOO_LARGE"
   fi
 fi
-jq -e -f "$FILTERS/body_check.jq" "$WORK/body.json" > /dev/null 2>&1 \
+jq -n -e -f "$FILTERS/body_check.jq" < "$WORK/body.json" > /dev/null 2>&1 \
   || die "The request body failed its own check: nothing was sent."
 
 # ------------------------------------------------------------ 15. dry run
-write_dry_run_input() {
-  : > "$WORK/dry.files"
-  local key i
-  for key in sbom trivy; do
-    if jq -e --arg k "$key" 'has($k)' "$WORK/body.json" > /dev/null; then
-      jq -j --arg k "$key" '.[$k]' "$WORK/body.json" > "$WORK/dry.part"
-      jq -cn --arg name "$key" --argjson bytes "$(bytes_of "$WORK/dry.part")" \
-        --arg sha "$(sha256_of "$WORK/dry.part")" \
-        '{name: $name, bytes: $bytes, sha256: $sha}' >> "$WORK/dry.files"
+# Plan §3 step 15: files, sizes, sha256, body keys, counts. dry_run.jq gives
+# the body keys and string sizes; the files (as they would be sent), the whole
+# body and the two counts are measured here. No token, no POST, no artifact.
+dry_file_line() {
+  printf -- '- %s: %s bytes, sha256 %s\n' "$1" "$(bytes_of "$2")" "$(sha256_of "$2")"
+}
+
+write_dry_run_report() {
+  local key i name components vulns
+  {
+    printf '## Seetrex Compliance (dry run)\n\n'
+    jq -r -f "$FILTERS/dry_run.jq" < "$WORK/body.json"
+    printf '\nFiles, as they would be sent:\n\n'
+    for key in sbom trivy; do
+      if jq -e --arg k "$key" 'has($k)' "$WORK/body.json" > /dev/null; then
+        jq -j --arg k "$key" '.[$k]' "$WORK/body.json" > "$WORK/dry.part"
+        dry_file_line "$key" "$WORK/dry.part"
+      fi
+    done
+    for ((i = 1; i <= n_att; i++)); do
+      jq -j --argjson i "$((i - 1))" '.attestations[$i]' "$WORK/body.json" > "$WORK/dry.part"
+      name="attestation $i"
+      if [[ "$(cat "$WORK/att/$i.path")" =~ ^\.seetrex/attestations/[A-Za-z0-9._-]{1,128}\.json$ ]]; then
+        name="$(cat "$WORK/att/$i.path")"
+      fi
+      dry_file_line "$name" "$WORK/dry.part"
+    done
+    dry_file_line "request body" "$WORK/body.json"
+    components="$(jq '[.components[]? | recurse(.components[]?)] | length' "$WORK/sbom.json")"
+    vulns="$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$WORK/trivy.json")"
+    printf '\nCounts:\n\n'
+    printf -- '- SBOM components (every level): %s\n' "${components%$'\r'}"
+    if [ "$left_out" = true ]; then
+      printf -- '- vulnerability report entries: %s (the report is left out)\n' "${vulns%$'\r'}"
+    else
+      printf -- '- vulnerability report entries: %s\n' "${vulns%$'\r'}"
     fi
-  done
-  for ((i = 0; i < n_att; i++)); do
-    jq -j --argjson i "$i" '.attestations[$i]' "$WORK/body.json" > "$WORK/dry.part"
-    jq -cn --arg name "attestation-$((i + 1))" --argjson bytes "$(bytes_of "$WORK/dry.part")" \
-      --arg sha "$(sha256_of "$WORK/dry.part")" \
-      '{name: $name, bytes: $bytes, sha256: $sha}' >> "$WORK/dry.files"
-  done
+    printf -- '- attestations: %s\n\n' "$n_att"
+  } > "$WORK/dry.md"
   rm -f -- "$WORK/dry.part"
-  local components vulns
-  components="$(jq '[.components[]? | recurse(.components[]?)] | length' "$WORK/sbom.json")"
-  vulns="$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$WORK/trivy.json")"
-  jq -cn --slurpfile files "$WORK/dry.files" \
-    --argjson bytes "$(bytes_of "$WORK/body.json")" \
-    --arg sha "$(sha256_of "$WORK/body.json")" \
-    --slurpfile body "$WORK/body.json" \
-    --argjson atts "$n_att" --argjson components "${components%$'\r'}" \
-    --argjson vulns "${vulns%$'\r'}" --argjson left "$left_out" \
-    '{mode: "push",
-      body: {bytes: $bytes, sha256: $sha, keys: ($body[0] | keys)},
-      files: $files,
-      counts: {attestations: $atts, components: $components, vulnerabilities: $vulns},
-      trivy_left_out: $left}' > "$WORK/dry.json"
 }
 
 if [ "$DRY_RUN" = true ]; then
-  write_dry_run_input
-  jq -r -f "$FILTERS/dry_run.jq" "$WORK/dry.json" > "$WORK/dry.md" \
-    || die "The dry-run report could not be rendered."
+  # Called plainly so that `set -e` stays in force inside it.
+  write_dry_run_report
   cat "$WORK/dry.md"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     cat "$WORK/dry.md" >> "$GITHUB_STEP_SUMMARY"

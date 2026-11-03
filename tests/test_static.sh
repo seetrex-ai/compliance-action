@@ -115,9 +115,9 @@ test_intent_action_never_sends_user_identity__static() {
 
 test_intent_harness_fake_trivy_is_pinned_served_and_logged() {
   # INTENT: the harness serves a fake Trivy whose sha256 is the one pinned in
-  # the case copy, and the fake writes fixtures by --format, honours @CWD@,
-  # logs argv/cwd/env names and leaves a marker; otherwise every Trivy test of
-  # U3 would pass or fail for the wrong reason.
+  # the case copy, and the fake writes fixtures by --format, honours @CWD@
+  # and @SCANARG@, logs argv/cwd/env names and leaves a marker; otherwise
+  # every Trivy test of U3 would pass or fail for the wrong reason.
   # CONTEXT: plan §4 (lib.sh, curl shim, fake trivy).
   # EXPIRES IF: the tests stop using a fake Trivy.
   setup_case
@@ -140,7 +140,7 @@ test_intent_harness_fake_trivy_is_pinned_served_and_logged() {
   tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP/trivy-bin"
   assert_file_exists "$RUNNER_TEMP/trivy-bin/trivy"
 
-  printf '{"metadata":{"component":{"name":"@CWD@"}}}\n' > "$CASE_DIR/cdx.json"
+  printf '{"metadata":{"component":{"name":"@CWD@","purl":"@SCANARG@"}}}\n' > "$CASE_DIR/cdx.json"
   set_trivy_fixture cyclonedx "$CASE_DIR/cdx.json"
   (
     cd "$WS"
@@ -152,6 +152,7 @@ test_intent_harness_fake_trivy_is_pinned_served_and_logged() {
   if ! trivy_ran; then fail "marker absent after a run"; fi
   assert_eq "$(cat "$FIXTURES_COMMON/trivy-report.json")" "$(cat "$RUNNER_TEMP/out.json")" "json fixture written"
   assert_json "$RUNNER_TEMP/sbom.json" ".metadata.component.name == \"$WS\"" "@CWD@ replaced by the cwd"
+  assert_json "$RUNNER_TEMP/sbom.json" '.metadata.component.purl == "."' "@SCANARG@ replaced by the path argument"
   assert_eq 2 "$(trivy_invocations)" "two invocations logged"
   assert_eq "$WS" "$(trivy_cwd 1)" "cwd logged"
   assert_eq "fs|--scanners|vuln|--format|json|--quiet|--output|$RUNNER_TEMP/out.json|." \

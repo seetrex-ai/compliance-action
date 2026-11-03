@@ -11,7 +11,10 @@
 #   - otherwise it reads `--format|-f <fmt>` and `--output|-o <file>` and
 #     writes $STATE/trivy-fixtures/<fmt> (json or cyclonedx) to the output
 #     file, or to stdout without --output; the literal token @CWD@ in the
-#     fixture is replaced by the working directory of the invocation;
+#     fixture is replaced by the working directory of the invocation, and
+#     the literal token @SCANARG@ by its path argument (the LAST argument,
+#     as in `trivy fs [flags] PATH`): real Trivy names the SBOM subject
+#     (metadata.component.name) after that argument;
 #   - $STATE/trivy-fixtures/exit_code, if present, makes it exit with that
 #     code before writing anything;
 #   - an unsupported or missing --format exits 2.
@@ -44,6 +47,7 @@ die() {
   exit 2
 }
 
+scanarg="${*: -1}"
 format=""
 output=""
 while [ $# -gt 0 ]; do
@@ -89,10 +93,11 @@ src="$STATE/trivy-fixtures/$format"
 [ -f "$src" ] || die "no fixture for --format $format"
 
 emit() {
-  if grep -qF -e '@CWD@' "$src"; then
+  if grep -qF -e '@CWD@' -e '@SCANARG@' "$src"; then
     local content
     content="$(cat "$src")"
-    printf '%s\n' "${content//@CWD@/"$PWD"}"
+    content="${content//@CWD@/"$PWD"}"
+    printf '%s\n' "${content//@SCANARG@/"$scanarg"}"
   else
     cat "$src"
   fi
