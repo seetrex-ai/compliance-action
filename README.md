@@ -16,9 +16,10 @@ picks up the attestation files you keep in `.seetrex/attestations/`, and sends
 the three to Seetrex. What it scans is exactly the pushed commit
 (`GITHUB_SHA`), copied out of the repository: files modified, staged or added
 in the working directory by earlier steps of the job are not scanned, and the
-repository's own `trivy.yaml` and `.trivyignore` are not applied. Seetrex evaluates them deterministically against a rule
-catalogue derived from the Cyber Resilience Act (CRA) and appends the outcome to
-a hash-chained, append-only record kept for your repository.
+repository's own `trivy.yaml` and `.trivyignore` are not applied. Seetrex
+evaluates them deterministically against a rule catalogue derived from the
+Cyber Resilience Act (CRA) and appends the outcome to a hash-chained,
+append-only record kept for your repository.
 
 What you get back, in the same job:
 
