@@ -98,3 +98,25 @@ test_intent_close_request_sends_only_the_close_field_and_no_documents() {
   assert_eq 1 "$(token_call_count)" "one token request"
   assert_line_eq "$RUN_STDOUT" "Seetrex accepted the close request." "accepted line"
 }
+
+test_intent_control_request_answered_with_html_is_not_accepted() {
+  # INTENT: a control request whose 200 answer is not JSON (an error page, a
+  # proxy) is retried like a push (3 POSTs) and never reported as accepted;
+  # the exit follows the table (non-JSON 200 after the retries: warning,
+  # exit 0; exit 1 with strict).
+  # CONTEXT: review A-I5 of D1: only a JSON object proves Seetrex answered.
+  # EXPIRES IF: the server drops the control requests.
+  local strict want
+  for strict in false true; do
+    setup_case
+    set_api_response 200 "$FIXTURES_CONTROL/resp-html.html"
+    run_action request-repin=true strict="$strict"
+    want=0
+    [ "$strict" = false ] || want=1
+    assert_rc "$want"
+    assert_eq 3 "$(api_call_count)" "strict=$strict: three POSTs"
+    assert_file_not_contains "$RUN_STDOUT" "Seetrex accepted" "strict=$strict: reported as accepted"
+    assert_line_eq "$RUN_STDOUT" "::warning::Seetrex answered with something that is not JSON, and the retries ran out: nothing was recorded." \
+      "strict=$strict: the table's line"
+  done
+}

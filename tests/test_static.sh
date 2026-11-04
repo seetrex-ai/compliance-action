@@ -296,9 +296,11 @@ test_intent_hostile_inputs_never_interpolated_in_run__static() {
 test_intent_run_step_drops_bash_env_and_cleans_up__static() {
   # INTENT: the run step starts run.sh with BASH_ENV removed and run.sh turns
   # tracing off as its first statement; the last step removes the output AND
-  # the work directories; the Trivy database cache is keyed per day, not per
-  # run (one saved cache a day instead of one per push).
-  # CONTEXT: review B-I5, A-M4 and A-M3 of D1.
+  # the work directories, under `if: always()`, so the Action declares no
+  # output naming a file it deletes; the Trivy database cache is keyed per
+  # day, not per run (one saved cache a day instead of one per push).
+  # CONTEXT: review B-I5, A-M4 and A-M3 of D1; A-I8 and B-M6 of the second
+  # review.
   # EXPIRES IF: the steps of action.yml are redesigned.
   _static_action_files
   local line first=""
@@ -314,6 +316,14 @@ test_intent_run_step_drops_bash_env_and_cleans_up__static() {
     esac
   done < "$ACTION_ROOT/bin/run.sh"
   assert_eq 'set +x' "$first" "the first statement of run.sh turns tracing off"
+  # The cleanup step runs whatever happened before it (review B-M6).
+  sed -n '/^    - name: Remove the Seetrex output and work directories$/,/^    - /p' \
+    "$ACTION_ROOT/action.yml" > "$TEST_TMP/cleanup-step"
+  assert_line_eq "$TEST_TMP/cleanup-step" '      if: always()' "the cleanup step runs always"
+  # No `record` output of the Action: the cleanup step deletes the file it
+  # would name (review A-I8); the upload step reads the step's own output.
+  assert_eq 0 "$(grep -c '^outputs:' "$ACTION_ROOT/action.yml" || true)" "action.yml declares no outputs"
+  assert_file_contains "$ACTION_ROOT/action.yml" 'path: ${{ steps.seetrex.outputs.record }}' "the upload reads the step output"
   assert_file_not_contains "$ACTION_ROOT/action.yml" "run_id" "the cache key is not per run"
   assert_file_contains "$ACTION_ROOT/action.yml" \
     'key: seetrex-trivy-db-${{ runner.os }}-${{ runner.arch }}-${{ steps.seetrex-day.outputs.day }}' \

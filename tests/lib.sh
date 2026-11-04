@@ -146,6 +146,11 @@
 #   trivy_cwd <n>              cwd of invocation n
 #   trivy_home <n>             value of HOME seen by invocation n
 #   trivy_env <n>              env var NAMES seen by invocation n, one per line
+#   trivy_files <n>            files under the cwd of invocation n (.git/
+#                              excluded), "<relpath> <sha256>", sorted
+#   trivy_reads <n>            config/ignore files invocation n would read as
+#                              real Trivy does ("config trivy.yaml",
+#                              "ignorefile .trivyignore"); empty = none
 #   github_output_value <key>  value of key=value in $GITHUB_OUTPUT (single-line)
 #
 # ASSERTIONS (each counts as one assertion; failure prints and `exit 1`)
@@ -180,12 +185,15 @@
 #                     execs the real tar)
 #   trivy.log         per invocation: "invocation", "cwd <dir>",
 #                     "home <HOME>", one "arg <a>" per argument, one
-#                     "env <NAME>" per env var, "end"
+#                     "env <NAME>" per env var, one "file <relpath> <sha256>"
+#                     per file under its cwd (.git/ excluded), "reads config
+#                     <f>" / "reads ignorefile <f>" when the file real Trivy
+#                     would read from its cwd exists, "end"
 #   trivy.ran         exists iff the fake trivy ran (even for --version)
 #
 # FIXED LINES (verbatim from the plan §1; run.sh must print these exactly)
 #   L_PUBLIC L_NOT_PUSH L_NON_DEFAULT L_401 L_LEFT_OUT L_TOO_LARGE
-#   L_TRIVY_SHA L_NO_OIDC; plus L_HEAD_NOT_SHA (added by the D1 review)
+#   L_TRIVY_SHA L_NO_OIDC
 #
 # CONSTANTS
 #   FAKE_JWT FAKE_REQUEST_TOKEN TEST_REPO_ID TEST_OWNER_ID TOKEN_URL
@@ -221,9 +229,6 @@ L_TOO_LARGE='The SBOM and attestations do not fit in one request even without th
 L_TRIVY_SHA='The Trivy download does not match its pinned sha256: nothing was scanned or sent.'
 # shellcheck disable=SC2034,SC2016  # literal backticks, no expansion wanted
 L_NO_OIDC='The workflow lacks `permissions: id-token: write`: nothing was sent.'
-# Not in the plan §1: added by the D1 review (A-I3), same form as the others.
-# shellcheck disable=SC2034
-L_HEAD_NOT_SHA='The checked-out commit is not the commit of this run (GITHUB_SHA): nothing was scanned or sent.'
 
 # ---------------------------------------------------------------- assertions
 
@@ -787,6 +792,14 @@ trivy_home() {
 
 trivy_env() {
   _trivy_field "$1" env
+}
+
+trivy_files() {
+  _trivy_field "$1" file
+}
+
+trivy_reads() {
+  _trivy_field "$1" reads
 }
 
 github_output_value() {

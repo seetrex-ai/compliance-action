@@ -38,7 +38,8 @@ def outcome_cell:
   else "-" end;
 
 def skipped_line:
-  if type == "string" and test("^[a-z_]{1,64}$") then
+  # Counted, not matched: jq's `$` also matches before a final newline.
+  if type == "string" and length >= 1 and length <= 64 and gsub("[a-z_]"; "") == "" then
     if . == "vuln_scan" then
       "- `vuln_scan`: the vulnerability report was not read (it was over its size cap, or the Action left it out); the obligations that read it are not current."
     elif . == "sbom_within_tolerance" then

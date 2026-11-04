@@ -2,9 +2,10 @@
 # Seetrex Compliance Action -- the run.sh step of action.yml.
 #
 # Order (plan D1 §3): visibility, event, default branch, inputs; then either a
-# control request (repin/close, no scan) or: the checked-out HEAD must be
-# GITHUB_SHA, then the pinned Trivy download checked by
-# sha256 before extraction, two scans of `.` under `env -i`, reduction by the
+# control request (repin/close, no scan) or: the tree of GITHUB_SHA is
+# materialised under the work directory, then the pinned Trivy download checked
+# by sha256 before extraction, two scans of `.` of that tree under `env -i`
+# (no repository trivy.yaml/.trivyignore), reduction by the
 # jq filters, attestations read from the commit tree, size measurement, body
 # check, dry-run report or OIDC token + POST, and the answer handled from files
 # only. Every fixed line below is compared verbatim by tests/.
@@ -49,7 +50,6 @@ L_TOO_LARGE='The SBOM and attestations do not fit in one request even without th
 L_TRIVY_SHA='The Trivy download does not match its pinned sha256: nothing was scanned or sent.'
 # shellcheck disable=SC2016  # literal backticks
 L_NO_OIDC='The workflow lacks `permissions: id-token: write`: nothing was sent.'
-L_HEAD_NOT_SHA='The checked-out commit is not the commit of this run (GITHUB_SHA): nothing was scanned or sent.'
 
 WORK=""
 cleanup() {
@@ -333,10 +333,17 @@ for f in sbom trivy body_check summary_full summary_counters dry_run; do
 done
 git -C "$GITHUB_WORKSPACE" cat-file -e "$GITHUB_SHA^{commit}" 2> /dev/null \
   || die "The commit of this run is not checked out in the workspace (run actions/checkout first): nothing was scanned or sent."
-# Trivy scans the worktree, so the worktree must be the commit of the run.
-head_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD 2> /dev/null || true)"
-head_sha="${head_sha%$'\r'}"
-[ "$head_sha" = "$GITHUB_SHA" ] || die "$L_HEAD_NOT_SHA"
+# What Trivy scans is the tree of GITHUB_SHA, materialised under WORK with a
+# private index: no uncommitted, staged or untracked file of the worktree, and
+# whatever HEAD the workflow checked out does not matter (so there is no
+# HEAD == GITHUB_SHA check). Not `git archive`: it honours export-ignore. The
+# user's index and worktree are not touched; LFS pointers stay pointers.
+mkdir "$WORK/tree"
+GIT_INDEX_FILE="$WORK/index" git -C "$GITHUB_WORKSPACE" read-tree "$GITHUB_SHA" \
+  && GIT_INDEX_FILE="$WORK/index" GIT_LFS_SKIP_SMUDGE=1 git -C "$GITHUB_WORKSPACE" \
+    checkout-index -a -f --prefix="$WORK/tree/" \
+  || die "The commit of this run could not be read from the workspace: nothing was scanned or sent."
+rm -f -- "$WORK/index"
 
 # ---------------------------------------------------------- 9. Trivy pin
 pin="${GITHUB_ACTION_PATH:-}/bin/trivy.pin"
@@ -378,8 +385,11 @@ TRIVY="$WORK/trivy-bin/trivy"
 chmod 700 "$TRIVY"
 
 # ---------------------------------------------------------- 10. scans
-# Only `.` is scanned, from the workspace, so no runner path names the subject;
-# Trivy sees a minimal environment (no runner tokens) and writes under WORK.
+# Only `.` is scanned, from the commit's tree, so no runner path names the
+# subject; Trivy sees a minimal environment (no runner tokens) and writes
+# under WORK. `--config ''` and `--ignorefile ''`: Trivy would otherwise read
+# trivy.yaml and .trivyignore from its cwd, i.e. from the repository (measured
+# with 0.76.1: a committed trivy.yaml redirected the database download).
 CACHE_DIR="$RUNNER_TEMP/seetrex-trivy-cache"
 mkdir -p "$CACHE_DIR"
 # HOME is an empty directory of the run, so no user config reaches Trivy.
@@ -390,8 +400,9 @@ for v in HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy; do
     scan_env+=("$v=${!v}")
   fi
 done
-common_flags=(--scanners vuln --quiet --skip-version-check --disable-telemetry --offline-scan --cache-dir "$CACHE_DIR")
-cd "$GITHUB_WORKSPACE"
+common_flags=(--scanners vuln --quiet --skip-version-check --disable-telemetry --offline-scan
+  --config '' --ignorefile '' --cache-dir "$CACHE_DIR")
+cd "$WORK/tree"
 env -i "${scan_env[@]}" "$TRIVY" fs --format json "${common_flags[@]}" \
   --output "$WORK/trivy.raw.json" . \
   || die "The vulnerability scan failed: nothing was sent."
@@ -550,13 +561,16 @@ else
 fi
 
 # Categories the server did not read, with a fixed text; only plain tokens.
-jq -r '.skipped // [] | if type == "array" then .[] | strings else empty end' \
+# The whole string is checked inside jq: `jq -r` would print "a\nb" as two
+# lines, each a plain token on its own (and jq's `$` also matches before a
+# final newline, hence the character count instead of a regex).
+jq -r '.skipped // [] | if type == "array" then .[] | strings
+       | select(length >= 1 and length <= 64 and gsub("[a-z_]"; "") == "")
+       else empty end' \
   "$WORK/resp" > "$WORK/skipped" 2> /dev/null || : > "$WORK/skipped"
 while IFS= read -r category || [ -n "$category" ]; do
   category="${category%$'\r'}"
-  if [[ "$category" =~ ^[a-z_]{1,64}$ ]]; then
-    printf 'Seetrex did not read the document of category %s in this push; the obligations that read it are not current.\n' "$category"
-  fi
+  printf 'Seetrex did not read the document of category %s in this push; the obligations that read it are not current.\n' "$category"
 done < "$WORK/skipped"
 
 # The record: only a non-null record of THIS repository is kept, as a file.

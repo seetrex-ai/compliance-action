@@ -5,8 +5,10 @@
 # `env -i`, so the fake cannot rely on any test environment variable).
 #
 # Behaviour:
-#   - every invocation appends a block to $STATE/trivy.log (format in lib.sh)
-#     and touches $STATE/trivy.ran (marker: the binary was executed at all);
+#   - every invocation appends a block to $STATE/trivy.log (format in lib.sh:
+#     cwd, HOME, args, env names, the files under its cwd with their sha256,
+#     and the config/ignore files real Trivy would read from its cwd) and
+#     touches $STATE/trivy.ran (marker: the binary was executed at all);
 #   - `--version` / `-v` / `version` prints "Version: <pinned version>";
 #   - otherwise it reads `--format|-f <fmt>` and `--output|-o <file>` and
 #     writes $STATE/trivy-fixtures/<fmt> (json or cyclonedx) to the output
@@ -32,6 +34,36 @@ STATE='@STATE_DIR@'
   while IFS= read -r name; do
     printf 'env %s\n' "$name"
   done < <(compgen -e)
+  # What it would scan: every regular file under its cwd except .git/, as
+  # "file <path relative to cwd> <sha256>", sorted.
+  while IFS= read -r -d '' f; do
+    sum="$(sha256sum < "$f")"
+    printf 'file %s %s\n' "${f#./}" "${sum%% *}"
+  done < <(find . -path ./.git -prune -o -type f -print0 | sort -z)
+  # Real Trivy reads a config file (-c/--config, default "trivy.yaml") and
+  # an ignore file (--ignorefile, default ".trivyignore") relative to its
+  # cwd; an empty value reads none. Modelled: "reads <kind> <file>" when the
+  # file it would read exists.
+  config=trivy.yaml
+  ignorefile=.trivyignore
+  prev=""
+  for a in "$@"; do
+    case "$prev" in
+      -c|--config) config="$a" ;;
+      --ignorefile) ignorefile="$a" ;;
+    esac
+    case "$a" in
+      --config=*) config="${a#--config=}" ;;
+      --ignorefile=*) ignorefile="${a#--ignorefile=}" ;;
+    esac
+    prev="$a"
+  done
+  if [ -n "$config" ] && [ -f "$config" ]; then
+    printf 'reads config %s\n' "$config"
+  fi
+  if [ -n "$ignorefile" ] && [ -f "$ignorefile" ]; then
+    printf 'reads ignorefile %s\n' "$ignorefile"
+  fi
   printf 'end\n'
 } >> "$STATE/trivy.log"
 : > "$STATE/trivy.ran"

@@ -53,6 +53,13 @@ _big_sbom() {
   }' > "$2"
 }
 
+_sha() {
+  local line
+  line="$(sha256sum < "$1")"
+  printf '%s
+' "${line%% *}"
+}
+
 _file_bytes() {
   local n
   n="$(wc -c < "$1")"
@@ -117,6 +124,14 @@ test_intent_attestations_read_from_commit_tree() {
   assert_file_not_contains "$body" "MODIFIED" "the worktree edit of A is not sent"
   assert_file_not_contains "$body" "never committed" "the uncommitted B is not sent"
   assert_file_not_contains "$body" "not an attestation" "non-json files are not sent"
+  # The Action still succeeds with a modified worktree, and Trivy scanned
+  # the commit: A as committed, no trace of the uncommitted B.
+  local n
+  for n in 1 2; do
+    trivy_files "$n" > "$CASE_DIR/files-$n"
+    assert_line_eq "$CASE_DIR/files-$n" ".seetrex/attestations/a.json $(_sha "$FIXTURES_RUN/attestation-a.json")"       "scan $n: A as committed"
+    assert_file_not_contains "$CASE_DIR/files-$n" ".seetrex/attestations/b.json" "scan $n: the uncommitted B"
+  done
 
   # More than 32 committed attestations: nothing is sent.
   setup_case
@@ -209,6 +224,7 @@ test_intent_log_of_run_with_findings_has_no_cve_nor_package() {
   reset_logs
   run_action
   assert_line_eq "$RUN_STDOUT" "::add-mask::$FAKE_JWT" "the JWT is masked"
+  assert_line_eq "$RUN_STDOUT" "::add-mask::$FAKE_REQUEST_TOKEN" "the request token is masked"
 }
 
 test_intent_public_repo_exits_with_fixed_line_and_no_counts() {
@@ -269,8 +285,8 @@ test_intent_summary_counters_keeps_results_out_of_the_summary() {
   # INTENT: with summary: counters, neither the filter nor a full run puts an
   # outcome, an obligation id, the legend, the skipped categories or the scan
   # date into the job summary.
-  # CONTEXT: plan D1 §4; README: the summary shows how much the record grew,
-  # never a result.
+  # CONTEXT: plan D1 §4; README: the summary shows only how many obligations
+  # are in each status, never a result.
   # EXPIRES IF: the summary modes are redesigned.
   local needle
   local -a needles=(outcome VIOLATED SATISFIED cra- "kept as history" "The engine" skipped vuln_scan scan_created_at 2099-02-28)
@@ -448,8 +464,11 @@ test_intent_body_contains_only_declared_fields() {
   jq -n -e -f "$ACTION_COPY/bin/filters/body_check.jq" < "$CASE_DIR/false.json" > /dev/null 2>&1 || rc=$?
   assert_ne 0 "$rc" "body_check refuses trivy_left_out: false"
 
-  # Left out: trivy_left_out is true and trivy is absent.
+  # Left out: trivy_left_out is true and trivy is absent; the attestations
+  # still travel.
   setup_case
+  commit_attestation "$FIXTURES_RUN/attestation-a.json" a.json
+  make_event private
   _big_trivy 1200 "$CASE_DIR/big-trivy.json"
   set_trivy_fixture json "$CASE_DIR/big-trivy.json"
   set_api_response 200 "$FIXTURES_RUN/resp-200.json"
@@ -458,6 +477,7 @@ test_intent_body_contains_only_declared_fields() {
   body="$(_last_api_body)"
   assert_json "$body" "$allowed" "left out: only declared keys"
   assert_json "$body" '.trivy_left_out == true and (has("trivy") | not)' "left out: flag true, no trivy"
+  assert_json "$body" '.attestations | length == 1' "left out: the attestation is sent"
 }
 
 test_intent_scan_that_does_not_fit_is_left_out_before_sending() {
@@ -523,14 +543,14 @@ test_intent_scan_that_does_not_fit_is_left_out_before_sending() {
 }
 
 test_intent_sbom_subject_name_does_not_depend_on_workdir() {
-  # INTENT: Trivy scans `.` from the workspace, so the runner's path never
-  # names the subject; two workspaces at different paths send byte-identical
+  # INTENT: Trivy scans `.` from the commit's tree, so the runner's path
+  # never names the subject; two workspaces at different paths send byte-identical
   # sbom strings.
   # CONTEXT: plan D1 §3 step 10 (finding 4 of M1): real Trivy names the SBOM
   # subject (metadata.component.name) after its path argument. The fake Trivy
   # models that: @SCANARG@ in the fixture becomes its path argument, so a run
   # that scanned "$GITHUB_WORKSPACE" instead of `.` would send the path.
-  # EXPIRES IF: the Action stops scanning the workspace with Trivy.
+  # EXPIRES IF: the Action stops scanning the commit with Trivy.
   local first_ws case n args
   jq '.metadata.component.name = "@SCANARG@"' "$FIXTURES_COMMON/sbom.cdx.json" \
     > "$TEST_TMP/sbom-scanarg.cdx.json"
@@ -553,7 +573,10 @@ test_intent_sbom_subject_name_does_not_depend_on_workdir() {
       args="$(trivy_args "$n")"
       assert_eq "." "$(printf '%s\n' "$args" | tail -n 1)" "case $case, scan $n: the path argument is ."
       assert_not_contains "$args" "$WS" "case $case, scan $n: the workspace path is not an argument"
-      assert_eq "$WS" "$(trivy_cwd "$n")" "case $case, scan $n: runs in the workspace"
+      case "$(trivy_cwd "$n")" in
+        "$RUNNER_TEMP"/seetrex-work.*/tree) assert_eq ok ok ;;
+        *) fail "case $case, scan $n: not run in the commit's tree: [$(trivy_cwd "$n")]" ;;
+      esac
     done
   done
   assert_eq "$(sha256sum < "$TEST_TMP/sbom-1")" "$(sha256sum < "$TEST_TMP/sbom-2")" \
@@ -619,12 +642,17 @@ _retry_case() {
   assert_rc "$want_rc"
 }
 
-test_intent_retries_with_backoff_only_when_the_server_asks() {
-  # INTENT: the POST is retried (at most 3 attempts, waiting 10 s then 30 s)
-  # only on 503, 429 rate_limited, 408, 5xx, a non-JSON answer or a transport
-  # failure; never on new_repository_budget_reached or a 4xx verdict. Our own
-  # outage or a quota only warns, unless strict.
-  # CONTEXT: plan D1 §3 steps 17 and 19 (D-R12).
+# The retry policy (plan D1 §3 steps 17 and 19, D-R12): the POST is retried
+# (at most 3 attempts, waiting 10 s then 30 s) only on 503, 429 rate_limited,
+# 408, 5xx, a non-JSON answer or a transport failure; never on
+# new_repository_budget_reached or a 4xx verdict. Our own outage or a quota
+# only warns, unless strict. Split in three tests (review A-M3) so that none
+# runs for minutes alone.
+
+test_intent_retries_with_backoff_on_outages_and_non_json() {
+  # INTENT: 503, 408, 5xx and a 200 that is not JSON are retried with the
+  # 10 s / 30 s backoff; an outage that outlasts the retries only warns.
+  # CONTEXT: see the retry policy above.
   # EXPIRES IF: the server's idempotency (action_router.rs:319-326) goes away.
   setup_case
   set_api_response 503 "$FIXTURES_RUN/resp-503.json"
@@ -645,7 +673,14 @@ test_intent_retries_with_backoff_only_when_the_server_asks() {
     _retry_case 3 "10 30" 0
     assert_file_contains "$RUN_STDOUT" "::warning::" "$s: warns"
   done
+}
 
+test_intent_retries_on_rate_and_transport_but_never_on_budget() {
+  # INTENT: a 429 rate_limited and a transport failure are retried; a 429
+  # new_repository_budget_reached is not (even with a Retry-After); all of
+  # them warn, and fail the job only with strict.
+  # CONTEXT: see the retry policy above.
+  # EXPIRES IF: the server's idempotency (action_router.rs:319-326) goes away.
   setup_case
   set_api_response 429 "$FIXTURES_RUN/resp-429-rate.json"
   _retry_case 3 "10 30" 0
@@ -667,12 +702,29 @@ test_intent_retries_with_backoff_only_when_the_server_asks() {
   setup_case
   set_api_response 429 "$FIXTURES_RUN/resp-429-budget.json"
   _retry_case 1 "" 1 strict=true
+}
 
+test_intent_no_retry_on_a_verdict_and_quota_only_warns() {
+  # INTENT: a 4xx verdict (400, 400 repository_not_supported, 401, 403, 409,
+  # 413) is never retried and fails the job, strict or not; a 200 reporting
+  # the quota reached is kept and only warns, unless strict.
+  # CONTEXT: see the retry policy above; review A-I4 of D1:
+  # repository_not_supported is a verdict, not our outage.
+  # EXPIRES IF: the server's idempotency (action_router.rs:319-326) goes away.
+  local s
   for s in 400 401 403 409 413; do
     setup_case
     set_api_response "$s" "$FIXTURES_RUN/resp-401.json"
     _retry_case 1 "" 1
   done
+
+  setup_case
+  printf '{"error":"repository_not_supported"}\n' > "$CASE_DIR/not-supported.json"
+  set_api_response 400 "$CASE_DIR/not-supported.json"
+  _retry_case 1 "" 1
+  assert_line_eq "$RUN_STDOUT" "Seetrex does not support this repository (400): nothing was recorded." \
+    "repository_not_supported: fixed line"
+  assert_file_not_contains "$RUN_STDOUT" "::warning::" "repository_not_supported: not a warning"
 
   # quota: reached on a 200: kept, warned, green unless strict.
   setup_case
@@ -728,17 +780,17 @@ _first_call_with_prefix() {
   done
 }
 
-# Asserts that call <n> was made with `-q` first, `--max-time <s>` and
-# `--proto =https` (each option followed by its value).
+# _assert_call_bounded <n> <what> <seconds>: call <n> was made with `-q`
+# first, `--max-time <seconds>` (that exact value, once) and `--proto =https`.
 _assert_call_bounded() {
-  local n="$1" what="$2" argv prev="" line first="" max=0 proto=0
+  local n="$1" what="$2" want="$3" argv prev="" line first="" max="" proto=0
   argv="$(curl_call_dir "$n")/argv"
   assert_file_exists "$argv" "$what: argv logged"
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
     [ -n "$first" ] || first="$line"
-    if [ "$prev" = --max-time ] && [[ "$line" =~ ^[0-9]+$ ]]; then
-      max=1
+    if [ "$prev" = --max-time ]; then
+      max="$max[$line]"
     fi
     if [ "$prev" = --proto ] && [ "$line" = '=https' ]; then
       proto=1
@@ -746,7 +798,7 @@ _assert_call_bounded() {
     prev="$line"
   done < "$argv"
   assert_eq -q "$first" "$what: -q is the first argument (no .curlrc)"
-  assert_eq 1 "$max" "$what: --max-time <seconds>"
+  assert_eq "[$want]" "$max" "$what: --max-time $want"
   assert_eq 1 "$proto" "$what: --proto =https"
 }
 
@@ -781,9 +833,17 @@ test_intent_requests_are_authenticated_and_bounded() {
   assert_line_eq "$(curl_call_dir "$api")/headers" "Content-Type: application/json" "push content type"
   assert_file_not_contains "$(curl_call_dir "$api")/headers" "$FAKE_REQUEST_TOKEN" \
     "no request token on the push"
-  _assert_call_bounded "$dl" "download"
-  _assert_call_bounded "$tok" "token"
-  _assert_call_bounded "$api" "push"
+  _assert_call_bounded "$dl" "download" 300
+  _assert_call_bounded "$tok" "token" 30
+  _assert_call_bounded "$api" "push" 60
+  # Neither token is ever an argument of a process (argv is readable by
+  # every process of the runner): both travel in 600 header files.
+  local i c
+  c="$(curl_count)"
+  for ((i = 1; i <= c; i++)); do
+    assert_file_not_contains "$(curl_call_dir "$i")/argv" "$FAKE_REQUEST_TOKEN" "call $i: request token on argv"
+    assert_file_not_contains "$(curl_call_dir "$i")/argv" "$FAKE_JWT" "call $i: JWT on argv"
+  done
 
   # A runner URL without a query string takes '?'.
   setup_case
@@ -794,6 +854,25 @@ test_intent_requests_are_authenticated_and_bounded() {
   tok="$(_first_call_with_prefix https://token.invalid/)"
   assert_eq "https://token.invalid/y?audience=https%3A%2F%2Fapi.seetrex.com" \
     "$(curl_call "$tok" url)" "token URL: runner URL + '?' + audience"
+
+  # A runner token URL that is not https: fixed line, the token is never
+  # asked for and nothing is sent (push: only the Trivy download ran;
+  # control request: no request at all).
+  local line="The runner's OIDC token URL is not https: nothing was sent."
+  setup_case
+  export ACTIONS_ID_TOKEN_REQUEST_URL='http://token.invalid/x?a=1'
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  run_action
+  assert_rc 1
+  assert_line_eq "$RUN_STDOUT" "$line" "http token URL: fixed line"
+  assert_eq 1 "$(curl_count)" "http token URL: only the Trivy download"
+  assert_eq 1 "$(download_call_count)" "http token URL: the one request is the download"
+  reset_logs
+  set_api_response 200 "$FIXTURES_RUN/resp-control.json"
+  run_action request-repin=true
+  assert_rc 1
+  assert_line_eq "$RUN_STDOUT" "$line" "http token URL, repin: fixed line"
+  assert_eq 0 "$(curl_count)" "http token URL, repin: no request"
 }
 
 test_intent_symlinked_attestation_is_never_sent() {
@@ -825,41 +904,86 @@ test_intent_symlinked_attestation_is_never_sent() {
 }
 
 test_intent_scanned_tree_is_the_commit_of_the_run() {
-  # INTENT: Trivy scans the worktree, so the Action refuses to run when the
-  # checked-out HEAD is not GITHUB_SHA: fixed line, exit 1, no request at
-  # all (no download, no token, no push), Trivy never runs; dry-run too.
-  # CONTEXT: review A-I3 of D1: a workflow that checks out another ref would
-  # send the scan of one commit under the token of another.
-  # EXPIRES IF: the Action scans the commit tree instead of the worktree.
-  local old dry
+  # INTENT: Trivy scans exactly the tree of GITHUB_SHA, materialised with a
+  # private index: not a file modified in the worktree, not an untracked file,
+  # not a staged-but-uncommitted file, not a later commit checked out as HEAD;
+  # the user's worktree and index are left as they were.
+  # CONTEXT: review I-7 of D1 (controller's decision): the token attests
+  # GITHUB_SHA, so the scan must be of that commit and nothing else; it
+  # replaces the HEAD == GITHUB_SHA refusal of A-I3, which a commit-tree scan
+  # makes moot.
+  # EXPIRES IF: the server scans the commit itself.
+  local old n dry
   setup_case
+  printf 'committed content
+' > "$CASE_DIR/app.js"
+  commit_file "$CASE_DIR/app.js" src/app.js
   old="$GITHUB_SHA"
-  printf 'second commit\n' > "$CASE_DIR/second.txt"
-  commit_file "$CASE_DIR/second.txt" second.txt
-  assert_ne "$old" "$GITHUB_SHA" "HEAD moved"
+  printf 'later commit
+' > "$CASE_DIR/later.txt"
+  commit_file "$CASE_DIR/later.txt" later.txt
   export GITHUB_SHA="$old"
+  printf 'modified in the worktree
+' > "$WS/src/app.js"
+  printf 'untracked
+' > "$WS/untracked.txt"
+  printf 'staged only
+' > "$WS/staged.txt"
+  git -C "$WS" add staged.txt
   make_event private
   set_api_response 200 "$FIXTURES_RUN/resp-200.json"
   for dry in false true; do
     reset_logs
     run_action dry-run="$dry"
-    assert_rc 1
-    assert_line_eq "$RUN_STDOUT" "$L_HEAD_NOT_SHA" "dry=$dry: fixed line"
-    assert_eq 0 "$(curl_count)" "dry=$dry: no request"
-    if trivy_ran; then fail "dry=$dry: trivy ran"; fi
-    _assert_no_record "dry=$dry"
+    assert_rc 0
+    assert_eq 2 "$(trivy_invocations)" "dry=$dry: two scans"
+    for n in 1 2; do
+      trivy_files "$n" > "$CASE_DIR/files-$n"
+      assert_line_eq "$CASE_DIR/files-$n" "src/app.js $(_sha "$CASE_DIR/app.js")"         "dry=$dry, scan $n: src/app.js as committed"
+      assert_line_eq "$CASE_DIR/files-$n" "package.json $(git -C "$WS" show "$old:package.json" | sha256sum | cut -d' ' -f1)"         "dry=$dry, scan $n: package.json of the commit"
+      for f in later.txt untracked.txt staged.txt; do
+        assert_file_not_contains "$CASE_DIR/files-$n" "$f" "dry=$dry, scan $n: scanned $f"
+      done
+    done
   done
+  assert_eq "modified in the worktree" "$(cat "$WS/src/app.js")" "the worktree is untouched"
+  local cached
+  cached="$(git -C "$WS" diff --cached --name-only)"
+  assert_eq staged.txt "${cached%$'\r'}" "the user's index is untouched"
+
+  # A commit that is not in the workspace's repository: nothing runs.
+  setup_case
+  export GITHUB_SHA=0123456789abcdef0123456789abcdef01234567
+  make_event private
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  run_action
+  assert_rc 1
+  assert_line_eq "$RUN_STDOUT" "The commit of this run is not checked out in the workspace (run actions/checkout first): nothing was scanned or sent."     "unknown commit: fixed line"
+  assert_eq 0 "$(curl_count)" "unknown commit: no request"
+  if trivy_ran; then fail "unknown commit: trivy ran"; fi
 }
 
 test_intent_trivy_runs_offline_without_telemetry_and_with_an_empty_home() {
   # INTENT: both Trivy scans run with --scanners vuln, --skip-version-check,
-  # --disable-telemetry and --offline-scan, and with HOME set to an empty
-  # directory of the run (not the runner's home), so Trivy calls no one but
-  # its database mirror and reads no user configuration.
-  # CONTEXT: review B-I3 and B-M4 of D1; README: network destinations.
+  # --disable-telemetry and --offline-scan, with `--config ''` and
+  # `--ignorefile ''`, and with HOME set to an empty directory of the run (not
+  # the runner's home), so Trivy calls no one but its database mirror and
+  # reads no user configuration: not the runner's, and not a trivy.yaml or
+  # .trivyignore committed in the scanned repository.
+  # CONTEXT: review B-I3 and B-M4 of D1; review C-1 (measured with Trivy
+  # 0.76.1: a committed trivy.yaml, read from Trivy's cwd, redirected the
+  # database download to a planted registry); README: network destinations.
   # EXPIRES IF: the Action stops running Trivy.
   local n flag home
   setup_case
+  printf 'db:
+  repository: registry.invalid/planted-db
+' > "$CASE_DIR/trivy.yaml"
+  commit_file "$CASE_DIR/trivy.yaml" trivy.yaml
+  printf 'CVE-2099-0001
+' > "$CASE_DIR/trivyignore"
+  commit_file "$CASE_DIR/trivyignore" .trivyignore
+  make_event private
   set_api_response 200 "$FIXTURES_RUN/resp-200.json"
   run_action
   assert_rc 0
@@ -870,6 +994,14 @@ test_intent_trivy_runs_offline_without_telemetry_and_with_an_empty_home() {
       assert_line_eq "$CASE_DIR/args-$n" "$flag" "scan $n: $flag"
     done
     assert_eq vuln "$(sed -n '/^--scanners$/{n;p;}' "$CASE_DIR/args-$n")" "scan $n: --scanners vuln"
+    for flag in --config --ignorefile; do
+      assert_eq 1 "$(grep -c -x -e "$flag" "$CASE_DIR/args-$n" || true)" "scan $n: $flag given once"
+      assert_eq "[]" "[$(sed -n "/^$flag\$/{n;p;}" "$CASE_DIR/args-$n")]" "scan $n: $flag ''"
+    done
+    trivy_files "$n" > "$CASE_DIR/files-$n"
+    assert_file_contains "$CASE_DIR/files-$n" "trivy.yaml " "scan $n: the committed trivy.yaml is in the scanned tree"
+    assert_file_contains "$CASE_DIR/files-$n" ".trivyignore " "scan $n: the committed .trivyignore is in the scanned tree"
+    assert_eq "" "$(trivy_reads "$n")" "scan $n: Trivy reads a config or ignore file"
     home="$(trivy_home "$n")"
     assert_ne "$HOME" "$home" "scan $n: not the runner's HOME"
     case "$home" in
@@ -980,4 +1112,93 @@ test_intent_tokens_never_traced_even_with_bash_env_xtrace() {
     assert_file_not_contains "$RUN_STDERR" "$needle" "a token traced on stderr"
     assert_file_not_contains "$CASE_DIR/stdout.unmasked" "$needle" "a token on stdout"
   done
+}
+
+test_intent_skipped_categories_are_echoed_only_as_plain_tokens() {
+  # INTENT: a `skipped` value of a 200 answer is named in the log only if it
+  # is a plain lower-case token as a whole string; a workflow command, a value
+  # with a newline (which `jq -r` would split into two plain tokens), markup
+  # or anything else never reaches the log or the job summary.
+  # CONTEXT: review A-I2 and B-M4 of D1: the answer is data, and a value
+  # like "::warning::x" or "a\nb" printed raw becomes a runner command or a
+  # forged line.
+  # EXPIRES IF: the Action stops echoing skipped categories.
+  local v
+  setup_case
+  jq '.skipped = ["::warning::x", "a\nb", "<b>", "Bad Value", "vuln_scan"]' \
+    "$FIXTURES_RUN/resp-200.json" > "$CASE_DIR/resp-skipped.json"
+  set_api_response 200 "$CASE_DIR/resp-skipped.json"
+  run_action
+  assert_rc 0
+  assert_line_eq "$RUN_STDOUT" "Seetrex did not read the document of category vuln_scan in this push; the obligations that read it are not current." \
+    "a well-formed category is named"
+  for v in "::warning::x" "category a " "category b " "<b>" "Bad Value"; do
+    assert_file_not_contains "$RUN_STDOUT" "$v" "stdout carries [$v]"
+    assert_file_not_contains "$GITHUB_STEP_SUMMARY" "$v" "summary carries [$v]"
+  done
+  assert_file_not_contains "$GITHUB_STEP_SUMMARY" '`a`' "summary names a split token"
+  assert_file_not_contains "$GITHUB_STEP_SUMMARY" '`b`' "summary names a split token"
+}
+
+test_intent_a_400_message_is_shown_only_when_plain() {
+  # INTENT: on a 400 the server's `message` is shown after the fixed line only
+  # when it is short plain text; anything else (a workflow command, markup)
+  # is dropped, and the run fails either way.
+  # CONTEXT: review A-I3 of D1: the message is server data printed into the
+  # log and the job summary.
+  # EXPIRES IF: the server stops sending a message with a 400.
+  local fixed="Seetrex rejected the request as malformed (400): nothing was recorded."
+  setup_case
+  printf '{"error":"bad_request","message":"sbom is not json"}\n' > "$CASE_DIR/400-plain.json"
+  set_api_response 400 "$CASE_DIR/400-plain.json"
+  run_action
+  assert_rc 1
+  assert_line_eq "$RUN_STDOUT" "$fixed" "plain: fixed line"
+  assert_line_eq "$RUN_STDOUT" "Seetrex said: sbom is not json" "plain: the message is shown"
+  assert_file_contains "$GITHUB_STEP_SUMMARY" "Seetrex said: sbom is not json" "plain: in the summary"
+
+  setup_case
+  printf '{"error":"bad_request","message":"::warning::<x>"}\n' > "$CASE_DIR/400-hostile.json"
+  set_api_response 400 "$CASE_DIR/400-hostile.json"
+  run_action
+  assert_rc 1
+  assert_line_eq "$RUN_STDOUT" "$fixed" "hostile: fixed line"
+  assert_file_not_contains "$RUN_STDOUT" "Seetrex said" "hostile: no message line"
+  assert_file_not_contains "$RUN_STDOUT" "::warning::" "hostile: no workflow command"
+  assert_file_not_contains "$GITHUB_STEP_SUMMARY" "<x>" "hostile: no markup in the summary"
+}
+
+test_intent_body_that_fails_its_own_check_is_never_sent() {
+  # INTENT: run.sh checks the body with bin/filters/body_check.jq before
+  # asking for a token: a body the check refuses stops the run with exit 1,
+  # no token request and no POST.
+  # CONTEXT: review A-I6 of D1: no test made the check fail, so a run.sh
+  # that skipped it would have passed.
+  # EXPIRES IF: the server's request schema check moves out of the Action.
+  setup_case
+  printf '# always refuses\nfalse\n' > "$ACTION_COPY/bin/filters/body_check.jq"
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  run_action
+  assert_rc 1
+  assert_line_eq "$RUN_STDOUT" "The request body failed its own check: nothing was sent." "fixed line"
+  assert_eq 0 "$(token_call_count)" "no token request"
+  assert_eq 0 "$(api_call_count)" "no POST"
+}
+
+test_intent_dry_run_names_an_attestation_only_by_a_plain_path() {
+  # INTENT: the dry-run report names an attestation by its path only when the
+  # file name is plain ([A-Za-z0-9._-]); any other name (here one with a
+  # space) is shown as "attestation <n>".
+  # CONTEXT: review B-M5 of D1: the file name is repository data printed into
+  # the log and the job summary.
+  # EXPIRES IF: the dry-run report stops listing attestations.
+  setup_case
+  commit_attestation "$FIXTURES_RUN/attestation-a.json" "a b.json"
+  make_event private
+  run_action dry-run=true
+  assert_rc 0
+  assert_file_contains "$RUN_STDOUT" "- attestation 1: " "the fallback name"
+  assert_file_not_contains "$RUN_STDOUT" "a b.json" "the raw name on stdout"
+  assert_file_not_contains "$GITHUB_STEP_SUMMARY" "a b.json" "the raw name in the summary"
+  assert_line_eq "$RUN_STDOUT" "- attestations: 1" "the attestation is counted"
 }
