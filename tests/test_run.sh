@@ -1171,6 +1171,96 @@ test_intent_scanned_tree_is_the_commit_of_the_run() {
   assert_eq "" "$(find "$CASE_DIR" -name evil-7d2 -print)" "crafted path: a file was written outside the tree"
 }
 
+# _literal_tree <mode> <name> <oid>: writes a one-entry tree object to $WS
+# without any check (`git mktree` refuses a name with a slash) and prints its
+# id. The entry is the raw `<mode> <name>\0<20-byte oid>` of the tree format.
+_literal_tree() {
+  local mode="$1" name="$2" oid="$3" esc="" i
+  for ((i = 0; i < ${#oid}; i += 2)); do
+    esc+="\\x${oid:i:2}"
+  done
+  # shellcheck disable=SC2059  # the format is the escaped oid on purpose
+  { printf '%s %s\0' "$mode" "$name"; printf "$esc"; } \
+    | git -C "$WS" hash-object -t tree --literally -w --stdin | tr -d '\r'
+}
+
+# _run_crafted_tree <tree> <label> <marker>: commits <tree> as GITHUB_SHA,
+# runs a dry run and asserts the path rule refused it: exit 1, the fixed
+# line, no scan, no request, and no file named <marker> written anywhere.
+_run_crafted_tree() {
+  local tree="$1" label="$2" marker="$3"
+  GITHUB_SHA="$(git -C "$WS" commit-tree -m crafted "$tree" | tr -d '\r')"
+  export GITHUB_SHA
+  make_event private
+  reset_logs
+  run_action dry-run=true
+  assert_rc 1
+  assert_line_eq "$RUN_STDOUT" "The commit of this run could not be read from the workspace: nothing was scanned or sent." \
+    "$label: fixed line"
+  if trivy_ran; then fail "$label: trivy ran"; fi
+  assert_eq 0 "$(curl_count)" "$label: no request"
+  assert_eq "" "$(find "$CASE_DIR" -name "$marker" -print)" "$label: a file was written"
+}
+
+test_intent_scanned_tree_refuses_a_dot_component() {
+  # INTENT: a commit whose tree has an entry named `.` (path `./x`) is refused
+  # before anything is written or scanned, like a `..` component.
+  # CONTEXT: D1 debt: of the five path rules of run.sh (`.`, `..`, `.git`,
+  # empty component, absolute) only `..` had a test. git never checks such a
+  # path out; a crafted commit can still carry it.
+  # EXPIRES IF: the Action stops materialising the commit's tree itself.
+  local blob inner top
+  setup_case
+  blob="$(printf 'dot\n' | git -C "$WS" hash-object -w --stdin | tr -d '\r')"
+  inner="$(printf '100644 blob %s\tdot-4e1\n' "$blob" | git -C "$WS" mktree | tr -d '\r')"
+  top="$(printf '040000 tree %s\t.\n' "$inner" | git -C "$WS" mktree | tr -d '\r')"
+  _run_crafted_tree "$top" "dot component" dot-4e1
+}
+
+test_intent_scanned_tree_refuses_a_dot_git_component() {
+  # INTENT: a commit whose tree has a `.git` entry, in any case (`.git`,
+  # `.GiT`), is refused before anything is written or scanned: no file of a
+  # crafted commit lands in a `.git` directory of the scanned tree.
+  # CONTEXT: D1 debt (see test_intent_scanned_tree_refuses_a_dot_component);
+  # the rule lower-cases the path because case-insensitive filesystems treat
+  # `.GiT` as `.git`.
+  # EXPIRES IF: the Action stops materialising the commit's tree itself.
+  local blob inner top name
+  for name in .git .GiT; do
+    setup_case
+    blob="$(printf 'git\n' | git -C "$WS" hash-object -w --stdin | tr -d '\r')"
+    inner="$(printf '100644 blob %s\tconfig-5b3\n' "$blob" | git -C "$WS" mktree | tr -d '\r')"
+    top="$(printf '040000 tree %s\t%s\n' "$inner" "$name" | git -C "$WS" mktree | tr -d '\r')"
+    _run_crafted_tree "$top" "$name component" config-5b3
+  done
+}
+
+test_intent_scanned_tree_refuses_an_empty_component() {
+  # INTENT: a path with an empty component (`a//b`, from an entry name that
+  # carries the slashes) is refused before anything is written or scanned.
+  # A tree entry whose whole name is empty never reaches the rule: git itself
+  # refuses to list it ("empty filename in tree entry"), and the run stops on
+  # the same fixed line.
+  # CONTEXT: D1 debt (see test_intent_scanned_tree_refuses_a_dot_component).
+  # EXPIRES IF: the Action stops materialising the commit's tree itself.
+  local blob
+  setup_case
+  blob="$(printf 'empty\n' | git -C "$WS" hash-object -w --stdin | tr -d '\r')"
+  _run_crafted_tree "$(_literal_tree 100644 'dir-6c4//empty-6c4' "$blob")" "empty component" empty-6c4
+  _run_crafted_tree "$(_literal_tree 100644 '' "$blob")" "empty name" empty-6c4
+}
+
+test_intent_scanned_tree_refuses_an_absolute_path() {
+  # INTENT: an absolute path (`/x`, from an entry name that starts with a
+  # slash) is refused before anything is written or scanned.
+  # CONTEXT: D1 debt (see test_intent_scanned_tree_refuses_a_dot_component).
+  # EXPIRES IF: the Action stops materialising the commit's tree itself.
+  local blob
+  setup_case
+  blob="$(printf 'abs\n' | git -C "$WS" hash-object -w --stdin | tr -d '\r')"
+  _run_crafted_tree "$(_literal_tree 100644 '/abs-7f5' "$blob")" "absolute path" abs-7f5
+}
+
 test_intent_partial_clone_fails_closed_without_fetching() {
   # INTENT: a blob of GITHUB_SHA missing from a partial clone is never fetched
   # from the repository's remote: the run stops with a fixed line, scans and
