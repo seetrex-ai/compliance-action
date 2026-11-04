@@ -332,19 +332,53 @@ fi
 for f in sbom trivy body_check summary_full summary_counters dry_run; do
   [ -f "$FILTERS/$f.jq" ] || die "The Action is incomplete (bin/filters/$f.jq is missing): nothing was scanned or sent."
 done
-git -C "$GITHUB_WORKSPACE" cat-file -e "$GITHUB_SHA^{commit}" 2> /dev/null \
+# Every git call that reads the commit goes through git_commit: replace refs
+# are off (an earlier step could `git replace` the commit, a tree or a blob
+# with another object), and a partial clone never fetches a missing object
+# from its remote (it fails closed instead).
+git_commit() {
+  GIT_NO_REPLACE_OBJECTS=1 GIT_NO_LAZY_FETCH=1 \
+    git --no-replace-objects -C "$GITHUB_WORKSPACE" "$@"
+}
+L_UNREADABLE='The commit of this run could not be read from the workspace: nothing was scanned or sent.'
+git_commit cat-file -e "$GITHUB_SHA^{commit}" 2> /dev/null \
   || die "The commit of this run is not checked out in the workspace (run actions/checkout first): nothing was scanned or sent."
-# What Trivy scans is the tree of GITHUB_SHA, materialised under WORK with a
-# private index: no uncommitted, staged or untracked file of the worktree, and
-# whatever HEAD the workflow checked out does not matter (so there is no
-# HEAD == GITHUB_SHA check). Not `git archive`: it honours export-ignore. The
-# user's index and worktree are not touched; LFS pointers stay pointers.
+# What Trivy scans is the tree of GITHUB_SHA, written under WORK blob by blob
+# with `git cat-file blob`, byte for byte as committed: no file of the
+# worktree (modified, staged or untracked), whatever HEAD the workflow checked
+# out (so there is no HEAD == GITHUB_SHA check), and no checkout conversion:
+# attributes (committed, untracked, $GIT_DIR/info/attributes,
+# core.attributesFile), core.autocrlf/core.eol, filters (LFS pointers stay
+# the pointer text as committed) and export-ignore play no part. The user's
+# index and worktree are not touched. Regular files only (100755 keeps its
+# executable bit); symbolic links (120000) and submodules (160000) are not
+# written, so nothing is written or read through a link. A path that is
+# absolute, has an empty, `.` or `..` component, or a `.git` component (any
+# case) is refused: git itself never checks such a path out.
 mkdir "$WORK/tree"
-GIT_INDEX_FILE="$WORK/index" git -C "$GITHUB_WORKSPACE" read-tree "$GITHUB_SHA" \
-  && GIT_INDEX_FILE="$WORK/index" GIT_LFS_SKIP_SMUDGE=1 git -C "$GITHUB_WORKSPACE" \
-    checkout-index -a -f --prefix="$WORK/tree/" \
-  || die "The commit of this run could not be read from the workspace: nothing was scanned or sent."
-rm -f -- "$WORK/index"
+git_commit ls-tree -r -z --full-tree "$GITHUB_SHA" > "$WORK/tree.list" 2> /dev/null \
+  || die "$L_UNREADABLE"
+while IFS= read -r -d '' entry; do
+  meta="${entry%%$'\t'*}"
+  path="${entry#*$'\t'}"
+  read -r mode otype oid <<< "$meta"
+  case "$mode" in
+    100644|100755) ;;
+    *) continue ;;
+  esac
+  [ "$otype" = blob ] || die "$L_UNREADABLE"
+  case "/${path,,}/" in
+    *//*|*/./*|*/../*|*/.git/*) die "$L_UNREADABLE" ;;
+  esac
+  if [ "${path%/*}" != "$path" ]; then
+    mkdir -p -- "$WORK/tree/${path%/*}" 2> /dev/null || die "$L_UNREADABLE"
+  fi
+  git_commit cat-file blob "$oid" > "$WORK/tree/$path" 2> /dev/null || die "$L_UNREADABLE"
+  if [ "$mode" = 100755 ]; then
+    chmod u+x -- "$WORK/tree/$path"
+  fi
+done < "$WORK/tree.list"
+rm -f -- "$WORK/tree.list"
 
 # ---------------------------------------------------------- 9. Trivy pin
 pin="${GITHUB_ACTION_PATH:-}/bin/trivy.pin"
@@ -422,7 +456,7 @@ rm -f -- "$WORK/sbom.raw.json" "$WORK/trivy.raw.json"
 # Only what is committed at GITHUB_SHA, never the worktree: regular blobs named
 # *.json directly under .seetrex/attestations/.
 mkdir "$WORK/att"
-git -C "$GITHUB_WORKSPACE" ls-tree -z "$GITHUB_SHA" .seetrex/attestations/ > "$WORK/att.tree" \
+git_commit ls-tree -z --full-tree "$GITHUB_SHA" .seetrex/attestations/ > "$WORK/att.tree" \
   || die "The attestations could not be listed from the commit: nothing was sent."
 n_att=0
 while IFS= read -r -d '' entry; do
@@ -439,7 +473,8 @@ while IFS= read -r -d '' entry; do
   if [ "$n_att" -gt "$MAX_ATTESTATIONS" ]; then
     die "More than $MAX_ATTESTATIONS attestation files are committed in .seetrex/attestations/: nothing was sent."
   fi
-  git -C "$GITHUB_WORKSPACE" cat-file blob "$oid" > "$WORK/att/$n_att.json"
+  git_commit cat-file blob "$oid" > "$WORK/att/$n_att.json" \
+    || die "The attestations could not be read from the commit: nothing was sent."
   printf '%s' "$path" > "$WORK/att/$n_att.path"
 done < "$WORK/att.tree"
 : > "$WORK/att.jsonl"

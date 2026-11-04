@@ -961,6 +961,146 @@ test_intent_scanned_tree_is_the_commit_of_the_run() {
   assert_line_eq "$RUN_STDOUT" "The commit of this run is not checked out in the workspace (run actions/checkout first): nothing was scanned or sent."     "unknown commit: fixed line"
   assert_eq 0 "$(curl_count)" "unknown commit: no request"
   if trivy_ran; then fail "unknown commit: trivy ran"; fi
+
+  # (a) Attributes and checkout conversions from outside the commit (an
+  # untracked .gitattributes, $GIT_DIR/info/attributes, core.attributesFile,
+  # core.autocrlf, core.eol) change nothing: each file is its committed blob.
+  local f
+  setup_case
+  printf 'line one\nline two\n' > "$CASE_DIR/lf.txt"
+  for f in src/app.js docs/notes.txt docs/guide.md data/plain.cfg; do
+    commit_file "$CASE_DIR/lf.txt" "$f"
+  done
+  printf '*.js eol=crlf\n*.txt working-tree-encoding=UTF-16\n' > "$WS/.gitattributes"
+  mkdir -p "$WS/.git/info"
+  printf '*.md eol=crlf\n' > "$WS/.git/info/attributes"
+  printf '*.cfg eol=crlf\n' > "$CASE_DIR/attributes"
+  git -C "$WS" config core.attributesFile "$CASE_DIR/attributes"
+  git -C "$WS" config core.autocrlf true
+  git -C "$WS" config core.eol crlf
+  make_event private
+  run_action dry-run=true
+  assert_rc 0
+  for n in 1 2; do
+    trivy_files "$n" > "$CASE_DIR/files-$n"
+    for f in src/app.js docs/notes.txt docs/guide.md data/plain.cfg; do
+      assert_line_eq "$CASE_DIR/files-$n" "$f $(_sha "$CASE_DIR/lf.txt")" "attributes, scan $n: $f as committed"
+    done
+    assert_file_not_contains "$CASE_DIR/files-$n" ".gitattributes" "attributes, scan $n: the untracked .gitattributes"
+  done
+
+  # (b) `git replace` of the commit, then of its blobs: the scan and the
+  # attestation sent are still those of GITHUB_SHA.
+  local x y
+  setup_case
+  printf 'committed content\n' > "$CASE_DIR/app.js"
+  commit_attestation "$FIXTURES_RUN/attestation-a.json" a.json
+  commit_file "$CASE_DIR/app.js" src/app.js
+  x="$GITHUB_SHA"
+  printf 'replacement content\n' > "$CASE_DIR/other.js"
+  commit_attestation "$FIXTURES_RUN/attestation-b.json" a.json
+  commit_file "$CASE_DIR/other.js" src/app.js
+  y="$GITHUB_SHA"
+  export GITHUB_SHA="$x"
+  make_event private
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  git -C "$WS" replace "$x" "$y"
+  for what in commit blobs; do
+    if [ "$what" = blobs ]; then
+      git -C "$WS" replace -d "$x" > /dev/null
+      git -C "$WS" replace "$(git -C "$WS" rev-parse "$x:src/app.js" | tr -d '\r')" \
+        "$(git -C "$WS" rev-parse "$y:src/app.js" | tr -d '\r')"
+      git -C "$WS" replace "$(git -C "$WS" rev-parse "$x:.seetrex/attestations/a.json" | tr -d '\r')" \
+        "$(git -C "$WS" rev-parse "$y:.seetrex/attestations/a.json" | tr -d '\r')"
+    fi
+    reset_logs
+    run_action
+    assert_rc 0
+    for n in 1 2; do
+      trivy_files "$n" > "$CASE_DIR/files-$n"
+      assert_line_eq "$CASE_DIR/files-$n" "src/app.js $(_sha "$CASE_DIR/app.js")" "replace $what, scan $n: src/app.js of GITHUB_SHA"
+    done
+    assert_json "$(_last_api_body)" '.attestations | length == 1' "replace $what: one attestation"
+    assert_eq "$(cat "$FIXTURES_RUN/attestation-a.json")" "$(jq -r '.attestations[0]' "$(_last_api_body)")" \
+      "replace $what: the attestation of GITHUB_SHA"
+  done
+
+  # (c) A committed filter=lfs attribute with a configured filter, and (d) an
+  # executable file and a nested directory: every file is written from its
+  # blob (the LFS pointer as committed, no filter runs); symbolic links are
+  # not materialised.
+  local ptr
+  setup_case
+  printf '*.bin filter=lfs diff=lfs merge=lfs -text\n' > "$CASE_DIR/gitattributes"
+  commit_file "$CASE_DIR/gitattributes" .gitattributes
+  printf 'version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize 12\n' \
+    "$(printf 'fixture blob' | sha256sum | cut -d' ' -f1)" > "$CASE_DIR/pointer"
+  commit_file "$CASE_DIR/pointer" assets/blob.bin
+  printf '#!/bin/sh\necho fixture\n' > "$CASE_DIR/tool.sh"
+  commit_file "$CASE_DIR/tool.sh" tools/tool.sh
+  git -C "$WS" update-index --chmod=+x tools/tool.sh
+  git -C "$WS" commit -q -m "tool is executable"
+  printf 'deep\n' > "$CASE_DIR/deep.txt"
+  commit_file "$CASE_DIR/deep.txt" a/b/c/deep.txt
+  ptr="$(git -C "$WS" hash-object -w "$CASE_DIR/deep.txt" | tr -d '\r')"
+  git -C "$WS" update-index --add --cacheinfo "120000,$ptr,link-to-deep"
+  git -C "$WS" commit -q -m "a symbolic link"
+  GITHUB_SHA="$(git -C "$WS" rev-parse HEAD | tr -d '\r')"
+  export GITHUB_SHA
+  printf '#!/bin/sh\n: > "%s"\necho SMUDGED\n' "$CASE_DIR/smudge.marker" > "$CASE_DIR/smudge.sh"
+  git -C "$WS" config filter.lfs.smudge "sh '$CASE_DIR/smudge.sh'"
+  git -C "$WS" config filter.lfs.required true
+  make_event private
+  run_action dry-run=true
+  assert_rc 0
+  for n in 1 2; do
+    trivy_files "$n" > "$CASE_DIR/files-$n"
+    assert_line_eq "$CASE_DIR/files-$n" "assets/blob.bin $(_sha "$CASE_DIR/pointer")" "lfs, scan $n: the pointer as committed"
+    assert_line_eq "$CASE_DIR/files-$n" "tools/tool.sh $(_sha "$CASE_DIR/tool.sh")" "scan $n: the executable file"
+    assert_line_eq "$CASE_DIR/files-$n" "a/b/c/deep.txt $(_sha "$CASE_DIR/deep.txt")" "scan $n: the nested file"
+    assert_file_not_contains "$CASE_DIR/files-$n" "link-to-deep" "scan $n: the symbolic link is not materialised"
+  done
+  assert_no_file "$CASE_DIR/smudge.marker" "lfs: the smudge filter ran"
+
+  # (e) A crafted tree whose path climbs out of the scanned directory: refused
+  # before anything is written outside it or scanned.
+  local blob inner outer top
+  setup_case
+  blob="$(printf 'evil\n' | git -C "$WS" hash-object -w --stdin | tr -d '\r')"
+  inner="$(printf '100644 blob %s\tevil-7d2\n' "$blob" | git -C "$WS" mktree | tr -d '\r')"
+  outer="$(printf '040000 tree %s\t..\n' "$inner" | git -C "$WS" mktree | tr -d '\r')"
+  top="$(printf '040000 tree %s\t..\n' "$outer" | git -C "$WS" mktree | tr -d '\r')"
+  GITHUB_SHA="$(git -C "$WS" commit-tree -m crafted "$top" | tr -d '\r')"
+  export GITHUB_SHA
+  make_event private
+  run_action dry-run=true
+  assert_rc 1
+  assert_line_eq "$RUN_STDOUT" "The commit of this run could not be read from the workspace: nothing was scanned or sent." \
+    "crafted path: fixed line"
+  if trivy_ran; then fail "crafted path: trivy ran"; fi
+  assert_eq "" "$(find "$CASE_DIR" -name evil-7d2 -print)" "crafted path: a file was written outside the tree"
+}
+
+test_intent_partial_clone_fails_closed_without_fetching() {
+  # INTENT: a blob of GITHUB_SHA missing from a partial clone is never fetched
+  # from the repository's remote: the run stops with a fixed line, scans and
+  # sends nothing.
+  # CONTEXT: review A-M3 of D1 (checkout with `filter: blob:none` and a
+  # sparse checkout); the README lists every network destination of a run.
+  # EXPIRES IF: the Action fetches the commit itself.
+  setup_case
+  printf 'nested\n' > "$CASE_DIR/nested.txt"
+  commit_file "$CASE_DIR/nested.txt" src/nested.txt
+  git -C "$WS" config uploadpack.allowFilter true
+  git clone -q --filter=blob:none --sparse "file://$WS" "$CASE_DIR/partial" 2> /dev/null
+  export GITHUB_WORKSPACE="$CASE_DIR/partial"
+  make_event private
+  run_action dry-run=true
+  assert_rc 1
+  assert_line_eq "$RUN_STDOUT" "The commit of this run could not be read from the workspace: nothing was scanned or sent." \
+    "partial clone: fixed line"
+  if trivy_ran; then fail "partial clone: trivy ran"; fi
+  assert_eq 0 "$(curl_count)" "partial clone: no request"
 }
 
 test_intent_trivy_runs_offline_without_telemetry_and_with_an_empty_home() {
