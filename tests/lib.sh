@@ -116,9 +116,11 @@
 #
 # RUNNING THE ACTION
 #   run_action [input=value ...]
-#     Runs ONLY step 2 of action.yml: `bash "$GITHUB_ACTION_PATH/bin/run.sh"`
-#     with cwd $GITHUB_WORKSPACE (the cache, upload-artifact and cleanup steps
-#     are not emulated). Inputs are passed as env, as action.yml must map them:
+#     Runs ONLY the run.sh step of action.yml, as
+#     `bash "$GITHUB_ACTION_PATH/bin/run.sh"` with cwd $GITHUB_WORKSPACE: the
+#     date, cache, upload-artifact and cleanup steps are not emulated, and
+#     neither is `env -u BASH_ENV` (so a BASH_ENV a test exports reaches
+#     run.sh). Inputs are passed as env, as action.yml must map them:
 #     name -> INPUT_<NAME upper-cased, '-' -> '_'>, with action.yml defaults
 #     INPUT_DRY_RUN=false INPUT_SUMMARY=full INPUT_STRICT=false
 #     INPUT_REQUEST_REPIN=false INPUT_REQUEST_CLOSE=false.

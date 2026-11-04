@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Seetrex Compliance Action -- step 2 of action.yml.
+# Seetrex Compliance Action -- the run.sh step of action.yml.
 #
 # Order (plan D1 §3): visibility, event, default branch, inputs; then either a
-# control request (repin/close, no scan) or: pinned Trivy download checked by
+# control request (repin/close, no scan) or: the checked-out HEAD must be
+# GITHUB_SHA, then the pinned Trivy download checked by
 # sha256 before extraction, two scans of `.` under `env -i`, reduction by the
 # jq filters, attestations read from the commit tree, size measurement, body
 # check, dry-run report or OIDC token + POST, and the answer handled from files
