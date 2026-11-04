@@ -7,8 +7,7 @@
 # Behaviour:
 #   - every invocation appends a block to $STATE/trivy.log (format in lib.sh:
 #     cwd, HOME, args, env names, the files under its cwd with their sha256,
-#     every file under its cwd with .git/ included, and the config/ignore
-#     files real Trivy would read from its cwd) and
+#     and the config/ignore files real Trivy would read from its cwd) and
 #     touches $STATE/trivy.ran (marker: the binary was executed at all);
 #   - `--version` / `-v` / `version` prints "Version: <pinned version>";
 #   - otherwise it reads `--format|-f <fmt>` and `--output|-o <file>` and
@@ -41,11 +40,6 @@ STATE='@STATE_DIR@'
     sum="$(sha256sum < "$f")"
     printf 'file %s %s\n' "${f#./}" "${sum%% *}"
   done < <(find . -path ./.git -prune -o -type f -print0 | sort -z)
-  # Every regular file under its cwd, .git/ included, as "seen <path>":
-  # what a crafted commit managed to put in front of the scanner anywhere.
-  while IFS= read -r -d '' f; do
-    printf 'seen %s\n' "${f#./}"
-  done < <(find . -type f -print0 | sort -z)
   # Real Trivy reads a config file (-c/--config, default "trivy.yaml") and
   # an ignore file (--ignorefile, default ".trivyignore") relative to its
   # cwd; an empty value reads none. Modelled: "reads <kind> <file>" when the

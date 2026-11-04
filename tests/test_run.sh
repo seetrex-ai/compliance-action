@@ -1218,14 +1218,14 @@ _literal_tree() {
     | git -C "$WS" hash-object -t tree --literally -w --stdin | tr -d '\r'
 }
 
-# _run_crafted_tree <tree> <label> <marker>: commits <tree> as GITHUB_SHA,
-# runs a dry run and asserts the path rule refused it: exit 1, the fixed
-# line, no scan, no request, and no file named <marker> ever put in front of
-# Trivy (any invocation, .git/ included). A file written under the scanned
-# tree cannot be looked for after the run: run.sh deletes its work directory
-# on exit.
+# _run_crafted_tree <tree> <label>: commits <tree> as GITHUB_SHA, runs a dry
+# run and asserts the path rule refused it: exit 1, the fixed line, no
+# request, and Trivy never invoked at all (trivy_ran false). That last check
+# is what measures "the crafted file never reaches Trivy": no invocation, no
+# scan of any tree. A file written under the scanned tree cannot be looked
+# for after the run: run.sh deletes its work directory on exit.
 _run_crafted_tree() {
-  local tree="$1" label="$2" marker="$3"
+  local tree="$1" label="$2"
   GITHUB_SHA="$(git -C "$WS" commit-tree -m crafted "$tree" | tr -d '\r')"
   export GITHUB_SHA
   make_event private
@@ -1236,7 +1236,6 @@ _run_crafted_tree() {
     "$label: fixed line"
   if trivy_ran; then fail "$label: trivy ran"; fi
   assert_eq 0 "$(curl_count)" "$label: no request"
-  assert_file_not_contains "$SHIM_STATE/trivy.log" "$marker" "$label: the file reached Trivy"
 }
 
 test_intent_scanned_tree_refuses_a_dot_component() {
@@ -1252,9 +1251,9 @@ test_intent_scanned_tree_refuses_a_dot_component() {
   blob="$(printf 'dot\n' | git -C "$WS" hash-object -w --stdin | tr -d '\r')"
   inner="$(printf '100644 blob %s\tdot-4e1\n' "$blob" | git -C "$WS" mktree | tr -d '\r')"
   dot="$(printf '040000 tree %s\t.\n' "$inner" | git -C "$WS" mktree | tr -d '\r')"
-  _run_crafted_tree "$dot" "dot component" dot-4e1
+  _run_crafted_tree "$dot" "dot component"
   top="$(printf '040000 tree %s\tsub-4e1\n' "$dot" | git -C "$WS" mktree | tr -d '\r')"
-  _run_crafted_tree "$top" "nested dot component" dot-4e1
+  _run_crafted_tree "$top" "nested dot component"
 }
 
 test_intent_scanned_tree_refuses_a_dot_git_component() {
@@ -1272,9 +1271,9 @@ test_intent_scanned_tree_refuses_a_dot_git_component() {
     blob="$(printf 'git\n' | git -C "$WS" hash-object -w --stdin | tr -d '\r')"
     inner="$(printf '100644 blob %s\tconfig-5b3\n' "$blob" | git -C "$WS" mktree | tr -d '\r')"
     git_dir="$(printf '040000 tree %s\t%s\n' "$inner" "$name" | git -C "$WS" mktree | tr -d '\r')"
-    _run_crafted_tree "$git_dir" "$name component" config-5b3
+    _run_crafted_tree "$git_dir" "$name component"
     top="$(printf '040000 tree %s\tsub-5b3\n' "$git_dir" | git -C "$WS" mktree | tr -d '\r')"
-    _run_crafted_tree "$top" "nested $name component" config-5b3
+    _run_crafted_tree "$top" "nested $name component"
   done
 }
 
@@ -1289,8 +1288,8 @@ test_intent_scanned_tree_refuses_an_empty_component() {
   local blob
   setup_case
   blob="$(printf 'empty\n' | git -C "$WS" hash-object -w --stdin | tr -d '\r')"
-  _run_crafted_tree "$(_literal_tree 100644 'dir-6c4//empty-6c4' "$blob")" "empty component" empty-6c4
-  _run_crafted_tree "$(_literal_tree 100644 '' "$blob")" "empty name" empty-6c4
+  _run_crafted_tree "$(_literal_tree 100644 'dir-6c4//empty-6c4' "$blob")" "empty component"
+  _run_crafted_tree "$(_literal_tree 100644 '' "$blob")" "empty name"
 }
 
 test_intent_scanned_tree_refuses_an_absolute_path() {
@@ -1301,7 +1300,7 @@ test_intent_scanned_tree_refuses_an_absolute_path() {
   local blob
   setup_case
   blob="$(printf 'abs\n' | git -C "$WS" hash-object -w --stdin | tr -d '\r')"
-  _run_crafted_tree "$(_literal_tree 100644 '/abs-7f5' "$blob")" "absolute path" abs-7f5
+  _run_crafted_tree "$(_literal_tree 100644 '/abs-7f5' "$blob")" "absolute path"
 }
 
 test_intent_partial_clone_fails_closed_without_fetching() {
