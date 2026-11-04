@@ -25,8 +25,13 @@
 # :883 and LEGEND :890, PushRecord :905 (never read here), skipped
 # values :506 (`sbom_within_tolerance`) and :511 (`vuln_scan`).
 
+# The match must span the whole string, counted, not anchored: jq's `$` also
+# matches before a final newline (as in skipped_line below).
 def safe($re):
-  if type == "string" and test($re) then . else "(unreadable)" end;
+  if type == "string"
+     and ([match($re)] | length == 1 and .[0].offset == 0)
+     and ([match($re)][0].length == length)
+  then . else "(unreadable)" end;
 
 def status_label:
   {current: "current", not_current: "not current", no_verdict: "no verdict",

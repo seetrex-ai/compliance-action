@@ -301,6 +301,18 @@ test_intent_summary_full_never_echoes_markup_from_the_answer() {
     "an ill-formed outcome reads as unreadable"
   assert_line_eq odd.md 'Evaluated at: (unreadable)' "an ill-formed date reads as unreadable"
   assert_line_eq odd.md 'Scan in force created at: none readable' "null scan_created_at"
+
+  # A value that matches its pattern but for a final newline (jq's `$` also
+  # matches before one) is unreadable too: `jq -r` would print it as two
+  # lines (review A-M7 of the third review).
+  jq '.results.evaluated_at += "\n" | .results.scan_created_at += "\n"
+      | .results.obligations[0].ruleset_id += "\n"
+      | .results.obligations[0].outcome += "\n"' \
+    "$FIXTURES_FILTERS/response-violated.json" > nl.json
+  _filter summary_full nl.json nl.md -r
+  assert_line_eq nl.md 'Evaluated at: (unreadable)' "evaluated_at ending in a newline"
+  assert_line_eq nl.md 'Scan in force created at: (unreadable)' "scan_created_at ending in a newline"
+  assert_line_eq nl.md '| `(unreadable)` | current | (unreadable) |' "ruleset id and outcome ending in a newline"
 }
 
 # ---------------------------------------------------------------- dry_run.jq
