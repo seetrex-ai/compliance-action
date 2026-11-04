@@ -391,6 +391,40 @@ test_intent_dry_run_contacts_no_seetrex_endpoint_and_no_oidc() {
   assert_line_eq "$RUN_STDOUT" "- SBOM components (every level): 5" "nested component count"
 }
 
+test_intent_dry_run_counts_an_sbom_with_malformed_components_without_failing() {
+  # INTENT: a dry run whose SBOM has, in a `components` list, an entry that
+  # is not an object (an array, a string), or a `components` that is not a
+  # list, still exits 0 and describes the body: the component count becomes a
+  # fixed text instead of a number (no crash, no silent miscount).
+  # CONTEXT: D1 debt: the count crashed with a jq error (exit 5) on an array
+  # entry, a shape Trivy does not generate; a real run would send that SBOM
+  # (the server refuses it), so the dry run must describe it, as dry_run.jq
+  # does with values of unexpected types.
+  # EXPIRES IF: the dry-run report stops counting SBOM components.
+  local shape label
+  for shape in array string object; do
+    setup_case
+    case "$shape" in
+      array) jq -n '{bomFormat: "CycloneDX", specVersion: "1.6",
+               components: [{name: "fixture-a"}, [{name: "fixture-b"}]]}' > "$CASE_DIR/sbom.json" ;;
+      string) jq -n '{bomFormat: "CycloneDX", specVersion: "1.6",
+               components: [{name: "fixture-a", components: ["fixture-b"]}]}' > "$CASE_DIR/sbom.json" ;;
+      object) jq -n '{bomFormat: "CycloneDX", specVersion: "1.6",
+               components: {name: "fixture-a"}}' > "$CASE_DIR/sbom.json" ;;
+    esac
+    set_trivy_fixture cyclonedx "$CASE_DIR/sbom.json"
+    label="components with a non-component $shape"
+    run_action dry-run=true
+    assert_rc 0
+    assert_line_eq "$RUN_STDOUT" "- SBOM components (every level): (not counted: an entry of components is not a component)" \
+      "$label: fixed count text"
+    assert_line_eq "$RUN_STDOUT" "- vulnerability report entries: 2" "$label: the other count"
+    assert_file_contains "$RUN_STDOUT" "- sbom: " "$label: the sbom file is listed"
+    assert_line_eq "$RUN_STDOUT" "Dry run: nothing was sent to Seetrex." "$label: dry-run line"
+    assert_eq 0 "$(api_call_count)" "$label: no Seetrex call"
+  done
+}
+
 test_intent_trivy_cache_dir_is_the_path_action_yml_caches() {
   # INTENT: both scans use as --cache-dir the very directory the cache step of
   # action.yml saves and restores, so the database downloaded by one push is

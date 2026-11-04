@@ -25,7 +25,8 @@
 #                            it never looks inside a document.
 #   The rest of a dry run (plan §3 step 15) is run.sh's own (jq cannot hash):
 #   each file as sent (name, bytes, sha256), the whole body (bytes, sha256),
-#   and the number of SBOM components (every nesting level) and of entries of
+#   and the number of SBOM components (every nesting level; a fixed text when
+#   an entry of a `components` list is not an object) and of entries of
 #   the reduced vulnerability report (also when it is left out). No name,
 #   identifier or package of a finding is ever printed.
 # A missing filter stops the run before anything is downloaded or sent.
@@ -550,7 +551,18 @@ write_dry_run_report() {
       dry_file_line "$name" "$WORK/dry.part"
     done
     dry_file_line "request body" "$WORK/body.json"
-    components="$(jq '[.components[]? | recurse(.components[]?)] | length' "$WORK/sbom.json")"
+    # Every element of every `components` list, at every level. An element
+    # that is not an object, or a `components` that is not a list (Trivy
+    # generates neither; the server refuses such an SBOM), makes the count a
+    # fixed text instead of a number: the report still describes the body.
+    components="$(jq -r '
+      def entries:
+        if type != "object" or .components == null then empty
+        elif (.components | type) != "array" then "bad"
+        else .components[] | if type == "object" then "ok", entries else "bad" end
+        end;
+      [entries] | if any(. == "bad") then "(not counted: an entry of components is not a component)"
+                  else length end' "$WORK/sbom.json")"
     vulns="$(jq '[.Results[]?.Vulnerabilities[]?] | length' "$WORK/trivy.json")"
     printf '\nCounts:\n\n'
     printf -- '- SBOM components (every level): %s\n' "${components%$'\r'}"
