@@ -1148,7 +1148,37 @@ test_intent_trivy_runs_offline_without_telemetry_and_with_an_empty_home() {
       "$RUNNER_TEMP"/seetrex-work.*/home) assert_eq ok ok ;;
       *) fail "scan $n: HOME is not the run's empty directory: [$home]" ;;
     esac
+    # Exactly the four variables run.sh passes (review B-I2 of the third
+    # review: the second scan's env was not checked).
+    assert_eq "HOME LANG PATH TMPDIR" "$(_trivy_env_names "$n")" "scan $n: environment"
   done
+  # Only the first scan downloads the database: real Trivy 0.76.1 refuses
+  # --skip-db-update on a first run with an empty cache (review A-I2).
+  assert_eq 0 "$(grep -c -x -e --skip-db-update "$CASE_DIR/args-1" || true)" "scan 1: no --skip-db-update"
+  assert_eq 1 "$(grep -c -x -e --skip-db-update "$CASE_DIR/args-2" || true)" "scan 2: --skip-db-update"
+
+  # Proxy variables reach both scans only when they are set.
+  reset_logs
+  HTTPS_PROXY=http://proxy.invalid:3128 no_proxy=example.invalid run_action
+  assert_rc 0
+  for n in 1 2; do
+    assert_eq "HOME HTTPS_PROXY LANG PATH TMPDIR no_proxy" "$(_trivy_env_names "$n")" "proxies set, scan $n: environment"
+  done
+}
+
+# Names of the env variables invocation <n> of trivy saw, sorted, on one line,
+# without those the shell running the fake trivy adds itself (bash: PWD,
+# SHLVL, _, OLDPWD; the MSYS runtime of Git for Windows: MSYSTEM, SYSTEMROOT,
+# WINDIR).
+_trivy_env_names() {
+  local name out=""
+  while IFS= read -r name; do
+    case "$name" in
+      PWD|SHLVL|_|OLDPWD|MSYSTEM|SYSTEMROOT|WINDIR) ;;
+      *) out="$out $name" ;;
+    esac
+  done < <(trivy_env "$1" | LC_ALL=C sort)
+  printf '%s\n' "${out# }"
 }
 
 # _hostile_input_case <input> <fixed line>: every hostile value of <input> is
