@@ -21,11 +21,13 @@ the job are not scanned; no `.gitattributes`, line-ending setting, filter or
 `.trivyignore` are not applied. Files stored with Git LFS are scanned as the
 pointer text that is committed, submodules are not scanned, and symbolic links
 are skipped. The Action never fetches a missing file from your remote. A
-partial clone (for example `filter: blob:none` in `actions/checkout`) that
-checked out the pushed commit already holds all of its files and is scanned
-as usual; when a file of the pushed commit is missing from the clone, as with
-a sparse checkout that leaves part of the tree out, the run stops and nothing
-is scanned or sent. Seetrex
+sparse checkout over a full clone is scanned in full, files outside your
+checkout included, since the clone holds every file of the commit. A partial
+clone (for example `filter: blob:none` in `actions/checkout`) holds only the
+files its checkout wrote: when that checkout covered the whole pushed commit
+it is scanned as usual; when it left part of the tree out (for example a
+sparse checkout), the files left out are missing from the clone, so the run
+stops and nothing is scanned or sent. Seetrex
 evaluates them deterministically against a rule catalogue derived from the
 Cyber Resilience Act (CRA) and appends the outcome to a hash-chained,
 append-only record kept for your repository.
