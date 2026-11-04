@@ -99,8 +99,10 @@ test_intent_action_never_contacts_api_github_com__static() {
 }
 
 test_intent_action_never_sends_user_identity__static() {
-  # INTENT: nothing identifying the person who pushed leaves the runner; the
-  # Action does not even read the token, secrets, the actor or the pusher.
+  # INTENT: nothing identifying a person leaves the runner beyond the claims
+  # of the OIDC token itself (actor, actor_id, sub, repository_owner,
+  # workflow, ref, sha, run_id, event_name...); the Action does not even read
+  # the GitHub token, secrets, the actor or the pusher.
   # CONTEXT: plan §4 (identity test); static half.
   # EXPIRES IF: never (privacy promise of the README).
   _static_action_files
@@ -243,4 +245,123 @@ test_intent_harness_curl_and_sleep_shims_never_reach_the_network() {
   rc=0
   curl -sS --data-binary @"$body" "$SEETREX_PUSH_URL" > /dev/null 2>&1 || rc=$?
   assert_eq 7 "$rc" "no queued answer = transport error"
+}
+
+# _yaml_run_bodies <file> <out>: writes to <out> the command text of every
+# `run:` of a workflow/action YAML file: the value of a one-line `run:`, or
+# every line of a `run: |` / `run: >` block. Prints the number of run steps.
+_yaml_run_bodies() {
+  local file="$1" out="$2" line ind=-1 cur val n=0
+  : > "$out"
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    if [ "$ind" -ge 0 ]; then
+      cur="${line%%[![:space:]]*}"
+      if [ -z "${line//[[:space:]]/}" ] || [ "${#cur}" -gt "$ind" ]; then
+        printf '%s\n' "$line" >> "$out"
+        continue
+      fi
+      ind=-1
+    fi
+    if [[ "$line" =~ ^([[:space:]]*)(-[[:space:]]+)?run:[[:space:]]*(.*)$ ]]; then
+      n=$((n + 1))
+      val="${BASH_REMATCH[3]}"
+      cur=$((${#BASH_REMATCH[1]} + ${#BASH_REMATCH[2]}))
+      if [[ "$val" =~ ^[\|\>][-+]?$ ]]; then
+        ind="$cur"
+      else
+        printf '%s\n' "$val" >> "$out"
+      fi
+    fi
+  done < "$file"
+  printf '%s\n' "$n"
+}
+
+# shellcheck disable=SC2016  # literal text of the Action's files
+test_intent_hostile_inputs_never_interpolated_in_run__static() {
+  # INTENT: no `run:` of action.yml contains a `${{ }}` expression: inputs
+  # reach run.sh only as env variables, so a hostile input is data, never
+  # shell text the runner pastes into a script.
+  # CONTEXT: review B-I4 of D1 (expression injection in composite actions).
+  # EXPIRES IF: the Action stops being a composite action.
+  _static_action_files
+  local n
+  n="$(_yaml_run_bodies "$ACTION_ROOT/action.yml" "$TEST_TMP/action-run")"
+  assert_ne 0 "$n" "action.yml has run steps"
+  assert_file_not_contains "$TEST_TMP/action-run" '${{' "a run: of action.yml interpolates an expression"
+  assert_file_not_contains "$TEST_TMP/action-run" 'inputs.' "a run: of action.yml names an input"
+}
+
+# shellcheck disable=SC2016  # literal text of the Action's files
+test_intent_run_step_drops_bash_env_and_cleans_up__static() {
+  # INTENT: the run step starts run.sh with BASH_ENV removed and run.sh turns
+  # tracing off as its first statement; the last step removes the output AND
+  # the work directories; the Trivy database cache is keyed per day, not per
+  # run (one saved cache a day instead of one per push).
+  # CONTEXT: review B-I5, A-M4 and A-M3 of D1.
+  # EXPIRES IF: the steps of action.yml are redesigned.
+  _static_action_files
+  local line first=""
+  _yaml_run_bodies "$ACTION_ROOT/action.yml" "$TEST_TMP/action-run" > /dev/null
+  assert_line_eq "$TEST_TMP/action-run" 'env -u BASH_ENV bash "$GITHUB_ACTION_PATH/bin/run.sh"' \
+    "run.sh is started without BASH_ENV"
+  assert_line_eq "$TEST_TMP/action-run" 'rm -rf -- "$RUNNER_TEMP/seetrex-out" "$RUNNER_TEMP"/seetrex-work.*' \
+    "the last step removes the output and work directories"
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      '#'*|'') continue ;;
+      *) first="$line"; break ;;
+    esac
+  done < "$ACTION_ROOT/bin/run.sh"
+  assert_eq 'set +x' "$first" "the first statement of run.sh turns tracing off"
+  assert_file_not_contains "$ACTION_ROOT/action.yml" "run_id" "the cache key is not per run"
+  assert_file_contains "$ACTION_ROOT/action.yml" \
+    'key: seetrex-trivy-db-${{ runner.os }}-${{ runner.arch }}-${{ steps.seetrex-day.outputs.day }}' \
+    "the cache key is per day"
+}
+
+# shellcheck disable=SC2016  # literal text of the Action's files
+test_intent_secrets_stay_private_masked_and_https_only__static() {
+  # INTENT: run.sh creates its files 600 (umask 077, and chmod 600 on both
+  # header files), masks the request token and the JWT, and every curl
+  # ignores .curlrc (-q first) and is https-only; the CI reads the repository
+  # only, keeps no credentials, pipes nothing and blocks on the Trivy pin.
+  # CONTEXT: review B-M1, B-M4 and B-M6 of D1.
+  # EXPIRES IF: the Action stops handling tokens in bash or stops using curl.
+  _static_action_files
+  local run="$ACTION_ROOT/bin/run.sh" ci="$ACTION_ROOT/.github/workflows/ci.yml"
+  local line n_curl=0 n_checkout n_persist n
+  assert_line_eq "$run" 'umask 077' "umask 077"
+  assert_file_contains "$run" 'chmod 600 "$WORK/token-request.hdr"' "request header file 600"
+  assert_file_contains "$run" 'chmod 600 "$WORK/auth.hdr"' "auth header file 600"
+  assert_file_contains "$run" "printf '::add-mask::%s\\n' \"\$ACTIONS_ID_TOKEN_REQUEST_TOKEN\"" "request token masked"
+  assert_file_contains "$run" "printf '::add-mask::%s\\n' \"\$jwt\"" "JWT masked"
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ (^|[[:space:]\(])curl[[:space:]] ]] || continue
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    n_curl=$((n_curl + 1))
+    assert_contains "$line" "curl -q " "run.sh: -q first: $line"
+    assert_contains "$line" "--proto '=https'" "run.sh: https only: $line"
+    assert_contains "$line" "--max-time " "run.sh: time limit: $line"
+  done < "$run"
+  assert_eq 3 "$n_curl" "run.sh has three curl calls"
+
+  assert_line_eq "$ci" 'permissions:' "ci.yml: workflow permissions"
+  assert_line_eq "$ci" '  contents: read' "ci.yml: contents: read"
+  assert_file_not_contains "$ci" 'write' "ci.yml: no write permission"
+  n_checkout="$(grep -c 'uses: actions/checkout@' "$ci" || true)"
+  n_persist="$(grep -c 'persist-credentials: false' "$ci" || true)"
+  assert_ne 0 "${n_checkout%$'\r'}" "ci.yml: checks out"
+  assert_eq "${n_checkout%$'\r'}" "${n_persist%$'\r'}" "ci.yml: every checkout drops the credentials"
+  assert_file_not_contains "$ci" 'continue-on-error' "ci.yml: every job blocks"
+  n="$(_yaml_run_bodies "$ci" "$TEST_TMP/ci-run")"
+  assert_ne 0 "$n" "ci.yml has run steps"
+  # A pipe hands the step the exit code of its last command; `||` is no pipe.
+  sed 's/||//g' "$TEST_TMP/ci-run" > "$TEST_TMP/ci-run.nor"
+  assert_file_not_contains "$TEST_TMP/ci-run.nor" '|' "ci.yml: a run step pipes"
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ "$line" =~ (^|[[:space:]\(])curl[[:space:]] ]] || continue
+    assert_contains "$line" "curl -q " "ci.yml: -q first: $line"
+    assert_contains "$line" "--proto '=https'" "ci.yml: https only: $line"
+  done < "$TEST_TMP/ci-run"
 }

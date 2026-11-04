@@ -1,22 +1,58 @@
 {
   "repo_slug": "gh-987654321",
   "appended": 1,
-  "last_ordinal": 7,
+  "last_ordinal": 1,
   "quota": "ok",
   "skipped": ["vuln_scan"],
   "results": {
-    "evaluated_at": "2099-03-01T00:00:00Z",
-    "scan_created_at": "2099-02-28T23:59:59Z",
+    "evaluated_at": "2099-03-01T00:00:00.000000Z",
+    "scan_created_at": "2099-02-28T23:59:59.000000Z",
     "obligations": [
-      {"ruleset_id": "cra-fixture-sbom", "status": "current", "outcome": "VIOLATED"},
-      {"ruleset_id": "cra-fixture-vulns", "status": "not_current", "last_verdict": {"outcome": "SATISFIED"}},
-      {"ruleset_id": "cra-fixture-policy", "status": "not_documented"}
+      {"ruleset_id": "cra-art13-third-party-components", "status": "current", "version": 1, "outcome": "VIOLATED", "ordinal": 1, "source_commit": "0123456789abcdef0123456789abcdef01234567"},
+      {"ruleset_id": "cra-art13-vulnerability-handling", "status": "not_current", "last_verdict": {"version": 1, "outcome": "SATISFIED", "ordinal": 1, "source_commit": null}},
+      {"ruleset_id": "cra-annex1-access-data-protection", "status": "no_verdict"},
+      {"ruleset_id": "cra-annex1-secure-design", "status": "not_documented"}
     ],
-    "legend": "Fixture legend: current means decided on this push."
+    "legend": {
+      "current": "The engine's last verdict; at evaluated_at the documents in force are the ones it read and the engine gives the same result over them.",
+      "not_current": "The engine's last verdict, kept as history; it does not stand at evaluated_at: the documents in force are not the ones it read, or the engine no longer gives this result over those same documents.",
+      "no_verdict": "No verdict is on record over the documents in force. This is not a result.",
+      "not_documented": "Not documented: there is no document in force of a kind this obligation reads."
+    }
   },
   "record": {
-    "format": "seetrex.record.v1",
+    "schema": "seetrex.record.v1",
+    "repository_as_told": "example-org/example-repo",
     "slug": "gh-987654321",
-    "entries": [{"ordinal": 7, "hash": "00000000000000000000000000000000000000000000000000000000000000aa"}]
+    "generated_at": "2099-03-01T00:00:00.000000Z",
+    "chain": {
+      "schema_version": "1.0",
+      "chain": [
+        {
+          "ordinal": 1,
+          "verdict_id": "00000000-0000-4000-8000-000000000001",
+          "verdict_hash": "00000000000000000000000000000000000000000000000000000000000000aa",
+          "chain_prev_hash": null,
+          "chain_hash": "00000000000000000000000000000000000000000000000000000000000000bb",
+          "appended_at": "2099-03-01T00:00:00Z",
+          "ruleset_id": "cra-art13-third-party-components",
+          "verdict_outcome": "VIOLATED"
+        }
+      ]
+    },
+    "anchor": null,
+    "results": {
+      "evaluated_at": "2099-03-01T00:00:00.000000Z",
+      "scan_created_at": "2099-02-28T23:59:59.000000Z",
+      "obligations": [
+        {"ruleset_id": "cra-art13-third-party-components", "status": "current", "version": 1, "outcome": "VIOLATED", "ordinal": 1, "source_commit": "0123456789abcdef0123456789abcdef01234567"}
+      ],
+      "legend": {
+        "current": "The engine's last verdict; at evaluated_at the documents in force are the ones it read and the engine gives the same result over them.",
+        "not_current": "The engine's last verdict, kept as history; it does not stand at evaluated_at: the documents in force are not the ones it read, or the engine no longer gives this result over those same documents.",
+        "no_verdict": "No verdict is on record over the documents in force. This is not a result.",
+        "not_documented": "Not documented: there is no document in force of a kind this obligation reads."
+      }
+    }
   }
 }

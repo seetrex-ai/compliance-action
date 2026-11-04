@@ -25,6 +25,7 @@ STATE='@STATE_DIR@'
 {
   printf 'invocation\n'
   printf 'cwd %s\n' "$PWD"
+  printf 'home %s\n' "${HOME:-}"
   for a in "$@"; do
     printf 'arg %s\n' "$a"
   done

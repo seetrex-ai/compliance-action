@@ -79,6 +79,14 @@ _assert_no_digits() {
   assert_eq "" "$hit" "$2"
 }
 
+# No tar call and nothing extracted anywhere under RUNNER_TEMP.
+_assert_nothing_extracted() {
+  local found
+  assert_eq 0 "$(tar_count)" "$1: tar was called"
+  found="$(find "$RUNNER_TEMP" \( -name trivy -o -name trivy-bin -o -name LICENSE \) -print)"
+  assert_eq "" "$found" "$1: something was extracted"
+}
+
 _assert_no_record() {
   assert_file_not_contains "$GITHUB_OUTPUT" "record=" "$1: no record output"
   assert_no_file "$RUNNER_TEMP/seetrex-out/seetrex-record.json" "$1: no record file"
@@ -125,9 +133,11 @@ test_intent_attestations_read_from_commit_tree() {
 }
 
 test_intent_action_never_sends_user_identity() {
-  # INTENT: nothing identifying the person who pushed leaves the runner: no
-  # URL, header or body of any request carries the pusher's name, email or
-  # login, although the event, git and the environment all hold them.
+  # INTENT: nothing identifying a person leaves the runner beyond the claims
+  # of the OIDC token itself (which GitHub fills with actor, actor_id, sub,
+  # repository_owner, workflow, ref, sha, run_id, event_name...): no URL,
+  # header, argument or body the Action builds carries the pusher's name,
+  # email or login, although the event, git and the environment all hold them.
   # CONTEXT: plan D1 §4 (identity test); dynamic half (static half in
   # test_static.sh).
   # EXPIRES IF: never (privacy promise of the README).
@@ -263,7 +273,7 @@ test_intent_summary_counters_keeps_results_out_of_the_summary() {
   # never a result.
   # EXPIRES IF: the summary modes are redesigned.
   local needle
-  local -a needles=(outcome VIOLATED SATISFIED cra- "Fixture legend" skipped vuln_scan scan_created_at 2099-02-28)
+  local -a needles=(outcome VIOLATED SATISFIED cra- "kept as history" "The engine" skipped vuln_scan scan_created_at 2099-02-28)
   setup_case
   jq -r -f "$ACTION_COPY/bin/filters/summary_counters.jq" "$FIXTURES_RUN/resp-200.json" > "$CASE_DIR/counters.md"
   assert_ne "" "$(cat "$CASE_DIR/counters.md")" "the filter prints something"
@@ -363,7 +373,8 @@ test_intent_non_default_ref_sends_nothing() {
 
 test_intent_trivy_download_fails_on_wrong_sha256() {
   # INTENT: a Trivy download that does not match the pinned sha256 is never
-  # extracted nor run, and nothing is sent; the fixed line says why.
+  # extracted (no tar call, no extracted file) nor run, and nothing is sent;
+  # the fixed line says why.
   # CONTEXT: plan D1 §3 step 9; supply-chain audit (hijacked Trivy 0.69.4).
   # EXPIRES IF: the Action stops downloading Trivy.
   setup_case
@@ -376,6 +387,7 @@ test_intent_trivy_download_fails_on_wrong_sha256() {
   assert_rc 1
   assert_line_eq "$RUN_STDOUT" "$L_TRIVY_SHA" "altered pin: fixed line"
   assert_eq 1 "$(download_call_count)" "altered pin: downloaded once"
+  _assert_nothing_extracted "altered pin"
   if trivy_ran; then fail "altered pin: trivy ran"; fi
   assert_eq 0 "$(token_call_count)" "altered pin: no token"
   assert_eq 0 "$(api_call_count)" "altered pin: no POST"
@@ -388,8 +400,16 @@ test_intent_trivy_download_fails_on_wrong_sha256() {
   run_action
   assert_rc 1
   assert_line_eq "$RUN_STDOUT" "$L_TRIVY_SHA" "tampered download: fixed line"
+  _assert_nothing_extracted "tampered download"
   if trivy_ran; then fail "tampered download: trivy ran"; fi
   assert_eq 0 "$(api_call_count)" "tampered download: no POST"
+
+  # Sanity of the tar shim: a matching download is extracted exactly once.
+  setup_case
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  run_action
+  assert_rc 0
+  assert_eq 1 "$(tar_count)" "matching download: one tar call"
 }
 
 test_intent_body_contains_only_declared_fields() {
@@ -691,5 +711,273 @@ test_intent_action_never_contacts_api_github_com() {
       esac
     done < <(curl_urls)
     assert_not_contains "$(curl_log)" "api.github.com" "$run: GitHub API contacted"
+  done
+}
+
+# Number of the first curl call whose URL starts with <prefix> (empty if none).
+_first_call_with_prefix() {
+  local i c
+  c="$(curl_count)"
+  for ((i = 1; i <= c; i++)); do
+    case "$(curl_call "$i" url)" in
+      "$1"*)
+        printf '%s\n' "$i"
+        return 0
+        ;;
+    esac
+  done
+}
+
+# Asserts that call <n> was made with `-q` first, `--max-time <s>` and
+# `--proto =https` (each option followed by its value).
+_assert_call_bounded() {
+  local n="$1" what="$2" argv prev="" line first="" max=0 proto=0
+  argv="$(curl_call_dir "$n")/argv"
+  assert_file_exists "$argv" "$what: argv logged"
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    [ -n "$first" ] || first="$line"
+    if [ "$prev" = --max-time ] && [[ "$line" =~ ^[0-9]+$ ]]; then
+      max=1
+    fi
+    if [ "$prev" = --proto ] && [ "$line" = '=https' ]; then
+      proto=1
+    fi
+    prev="$line"
+  done < "$argv"
+  assert_eq -q "$first" "$what: -q is the first argument (no .curlrc)"
+  assert_eq 1 "$max" "$what: --max-time <seconds>"
+  assert_eq 1 "$proto" "$what: --proto =https"
+}
+
+test_intent_requests_are_authenticated_and_bounded() {
+  # INTENT: the token is asked for with the request token and the audience
+  # https://api.seetrex.com appended to the runner's URL with the right
+  # separator; the push carries exactly `Authorization: Bearer <jwt>`; every
+  # request ignores .curlrc, is https-only and has a time limit.
+  # CONTEXT: review A-I1 of D1: authentication was never asserted, so a wrong
+  # audience, a missing header or an unbounded request went unseen.
+  # EXPIRES IF: the Action stops using the runner's OIDC token or curl.
+  local tok api dl
+  setup_case
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  run_action
+  assert_rc 0
+  tok="$(_first_call_with_prefix https://token.invalid/)"
+  api="$(_first_call_with_prefix https://api.seetrex.com/)"
+  dl="$(_first_call_with_prefix "$TRIVY_DOWNLOAD_PREFIX")"
+  assert_ne "" "$tok" "a token call was made"
+  assert_ne "" "$api" "a push was made"
+  assert_ne "" "$dl" "a download was made"
+  assert_eq "https://token.invalid/x?a=1&audience=https%3A%2F%2Fapi.seetrex.com" \
+    "$(curl_call "$tok" url)" "token URL: runner URL + '&' + audience"
+  assert_line_eq "$(curl_call_dir "$tok")/headers" "Authorization: Bearer $FAKE_REQUEST_TOKEN" \
+    "the token call carries the request token"
+  assert_file_not_contains "$(curl_call_dir "$tok")/headers" "$FAKE_JWT" "no JWT on the token call"
+  assert_eq "$SEETREX_PUSH_URL" "$(curl_call "$api" url)" "push URL"
+  assert_eq POST "$(curl_call "$api" method)" "push method"
+  assert_line_eq "$(curl_call_dir "$api")/headers" "Authorization: Bearer $FAKE_JWT" \
+    "the push carries the JWT"
+  assert_line_eq "$(curl_call_dir "$api")/headers" "Content-Type: application/json" "push content type"
+  assert_file_not_contains "$(curl_call_dir "$api")/headers" "$FAKE_REQUEST_TOKEN" \
+    "no request token on the push"
+  _assert_call_bounded "$dl" "download"
+  _assert_call_bounded "$tok" "token"
+  _assert_call_bounded "$api" "push"
+
+  # A runner URL without a query string takes '?'.
+  setup_case
+  export ACTIONS_ID_TOKEN_REQUEST_URL='https://token.invalid/y'
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  run_action
+  assert_rc 0
+  tok="$(_first_call_with_prefix https://token.invalid/)"
+  assert_eq "https://token.invalid/y?audience=https%3A%2F%2Fapi.seetrex.com" \
+    "$(curl_call "$tok" url)" "token URL: runner URL + '?' + audience"
+}
+
+test_intent_symlinked_attestation_is_never_sent() {
+  # INTENT: a symlink committed under .seetrex/attestations/ (mode 120000) is
+  # never sent: neither its target path nor what it points at; only the
+  # regular attestation files are.
+  # CONTEXT: review A-I2 of D1: a link's blob is its target path, and a link
+  # could point outside the attestation directory.
+  # EXPIRES IF: the server reads the attestations from the commit itself.
+  local oid mode body
+  setup_case
+  commit_attestation "$FIXTURES_RUN/attestation-a.json" a.json
+  oid="$(printf '%s' '../../outside-target-7c1.json' | git -C "$WS" hash-object -w --stdin)"
+  oid="${oid%$'\r'}"
+  git -C "$WS" update-index --add --cacheinfo "120000,$oid,.seetrex/attestations/link.json"
+  git -C "$WS" commit -q -m "add a symlinked attestation"
+  _refresh_sha
+  mode="$(git -C "$WS" ls-tree HEAD .seetrex/attestations/link.json)"
+  assert_eq 120000 "${mode%% *}" "the fixture commits a symlink"
+  make_event private
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  run_action
+  assert_rc 0
+  body="$(_last_api_body)"
+  assert_json "$body" '.attestations | length == 1' "only the regular attestation is sent"
+  assert_eq "$(cat "$FIXTURES_RUN/attestation-a.json")" "$(jq -r '.attestations[0]' "$body")" \
+    "the attestation sent is A"
+  assert_file_not_contains "$body" "outside-target-7c1" "the link target is not sent"
+}
+
+test_intent_scanned_tree_is_the_commit_of_the_run() {
+  # INTENT: Trivy scans the worktree, so the Action refuses to run when the
+  # checked-out HEAD is not GITHUB_SHA: fixed line, exit 1, no request at
+  # all (no download, no token, no push), Trivy never runs; dry-run too.
+  # CONTEXT: review A-I3 of D1: a workflow that checks out another ref would
+  # send the scan of one commit under the token of another.
+  # EXPIRES IF: the Action scans the commit tree instead of the worktree.
+  local old dry
+  setup_case
+  old="$GITHUB_SHA"
+  printf 'second commit\n' > "$CASE_DIR/second.txt"
+  commit_file "$CASE_DIR/second.txt" second.txt
+  assert_ne "$old" "$GITHUB_SHA" "HEAD moved"
+  export GITHUB_SHA="$old"
+  make_event private
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  for dry in false true; do
+    reset_logs
+    run_action dry-run="$dry"
+    assert_rc 1
+    assert_line_eq "$RUN_STDOUT" "$L_HEAD_NOT_SHA" "dry=$dry: fixed line"
+    assert_eq 0 "$(curl_count)" "dry=$dry: no request"
+    if trivy_ran; then fail "dry=$dry: trivy ran"; fi
+    _assert_no_record "dry=$dry"
+  done
+}
+
+test_intent_trivy_runs_offline_without_telemetry_and_with_an_empty_home() {
+  # INTENT: both Trivy scans run with --scanners vuln, --skip-version-check,
+  # --disable-telemetry and --offline-scan, and with HOME set to an empty
+  # directory of the run (not the runner's home), so Trivy calls no one but
+  # its database mirror and reads no user configuration.
+  # CONTEXT: review B-I3 and B-M4 of D1; README: network destinations.
+  # EXPIRES IF: the Action stops running Trivy.
+  local n flag home
+  setup_case
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  run_action
+  assert_rc 0
+  assert_eq 2 "$(trivy_invocations)" "two scans"
+  for n in 1 2; do
+    trivy_args "$n" > "$CASE_DIR/args-$n"
+    for flag in --skip-version-check --disable-telemetry --offline-scan; do
+      assert_line_eq "$CASE_DIR/args-$n" "$flag" "scan $n: $flag"
+    done
+    assert_eq vuln "$(sed -n '/^--scanners$/{n;p;}' "$CASE_DIR/args-$n")" "scan $n: --scanners vuln"
+    home="$(trivy_home "$n")"
+    assert_ne "$HOME" "$home" "scan $n: not the runner's HOME"
+    case "$home" in
+      "$RUNNER_TEMP"/seetrex-work.*/home) assert_eq ok ok ;;
+      *) fail "scan $n: HOME is not the run's empty directory: [$home]" ;;
+    esac
+  done
+}
+
+# _hostile_input_case <input> <fixed line>: every hostile value of <input> is
+# refused before anything runs, and never echoed.
+_hostile_input_case() {
+  local input="$1" line="$2" v
+  # shellcheck disable=SC2016  # literal hostile values, never expanded
+  local -a values=(
+    'full$(touch "$TEST_TMP/pwned")'
+    '../../x'
+    $'true\nfoo=bar'
+    '`id`'
+    "'; echo x"
+    'TRUE'
+  )
+  setup_case
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  for v in "${values[@]}"; do
+    reset_logs
+    run_action "$input=$v"
+    assert_rc 1
+    assert_line_eq "$RUN_STDOUT" "$line" "$input=[$v]: fixed line"
+    assert_eq 0 "$(curl_count)" "$input=[$v]: no request"
+    if trivy_ran; then fail "$input=[$v]: trivy ran"; fi
+    if [[ "$v" == *$'\n'* ]]; then
+      assert_file_not_contains "$RUN_STDOUT" "foo=bar" "$input: value echoed on stdout"
+      assert_file_not_contains "$RUN_STDERR" "foo=bar" "$input: value echoed on stderr"
+      assert_file_not_contains "$GITHUB_STEP_SUMMARY" "foo=bar" "$input: value echoed in the summary"
+      assert_file_not_contains "$GITHUB_OUTPUT" "foo=bar" "$input: value in the outputs"
+    else
+      assert_file_not_contains "$RUN_STDOUT" "$v" "$input=[$v]: echoed on stdout"
+      assert_file_not_contains "$RUN_STDERR" "$v" "$input=[$v]: echoed on stderr"
+      assert_file_not_contains "$GITHUB_STEP_SUMMARY" "$v" "$input=[$v]: echoed in the summary"
+    fi
+    assert_no_file "$TEST_TMP/pwned" "$input=[$v]: a command ran"
+  done
+}
+
+test_intent_hostile_inputs_dry_run() {
+  # INTENT: a dry-run value other than true/false (command substitution,
+  # path, newline, backticks, quote, other case) stops the run: exit 1,
+  # fixed line, no request, no scan, the value never echoed or executed.
+  # CONTEXT: review B-I4 of D1; inputs reach run.sh only as env variables.
+  # EXPIRES IF: the input is removed.
+  _hostile_input_case dry-run "Input dry-run must be true or false: nothing was sent."
+}
+
+test_intent_hostile_inputs_summary() {
+  # INTENT: a summary value other than full/counters stops the run (see
+  # test_intent_hostile_inputs_dry_run); the value never selects a file.
+  # CONTEXT: review B-I4 of D1: run.sh builds bin/filters/summary_<value>.jq.
+  # EXPIRES IF: the input is removed.
+  _hostile_input_case summary "Input summary must be full or counters: nothing was sent."
+}
+
+test_intent_hostile_inputs_strict() {
+  # INTENT: as test_intent_hostile_inputs_dry_run, for strict.
+  # CONTEXT: review B-I4 of D1.
+  # EXPIRES IF: the input is removed.
+  _hostile_input_case strict "Input strict must be true or false: nothing was sent."
+}
+
+test_intent_hostile_inputs_request_repin() {
+  # INTENT: as test_intent_hostile_inputs_dry_run, for request-repin.
+  # CONTEXT: review B-I4 of D1.
+  # EXPIRES IF: the input is removed.
+  _hostile_input_case request-repin "Input request-repin must be true or false: nothing was sent."
+}
+
+test_intent_hostile_inputs_request_close() {
+  # INTENT: as test_intent_hostile_inputs_dry_run, for request-close.
+  # CONTEXT: review B-I4 of D1.
+  # EXPIRES IF: the input is removed.
+  _hostile_input_case request-close "Input request-close must be true or false: nothing was sent."
+}
+
+test_intent_tokens_never_traced_even_with_bash_env_xtrace() {
+  # INTENT: a BASH_ENV that turns on `set -x` (or SHELLOPTS=xtrace) does not
+  # make run.sh print the request token or the JWT: run.sh turns tracing off
+  # as its first statement (and action.yml unsets BASH_ENV).
+  # CONTEXT: review B-I5 of D1: GitHub masks only after ::add-mask::, and an
+  # xtrace line of the printf that writes the header file would leak it.
+  # EXPIRES IF: the Action stops handling tokens in bash.
+  local needle
+  setup_case
+  # The shims are bash too: tracing them would log what the test harness
+  # itself handles, so the hook leaves them alone.
+  # shellcheck disable=SC2016  # literal $0, expanded by the traced bash
+  printf 'case "$0" in */shims/*) ;; *) set -x ;; esac\n' > "$CASE_DIR/bash_env"
+  printf 'probe_marker=traced\n' > "$CASE_DIR/probe.sh"
+  BASH_ENV="$CASE_DIR/bash_env" bash "$CASE_DIR/probe.sh" 2> "$CASE_DIR/probe.err"
+  assert_file_contains "$CASE_DIR/probe.err" "probe_marker=traced" "sanity: the BASH_ENV file turns tracing on"
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  export BASH_ENV="$CASE_DIR/bash_env"
+  run_action
+  unset BASH_ENV
+  assert_rc 0
+  assert_eq 1 "$(api_call_count)" "the push was sent"
+  sed '/^::add-mask::/d' "$RUN_STDOUT" > "$CASE_DIR/stdout.unmasked"
+  for needle in "$FAKE_JWT" "$FAKE_REQUEST_TOKEN"; do
+    assert_file_not_contains "$RUN_STDERR" "$needle" "a token traced on stderr"
+    assert_file_not_contains "$CASE_DIR/stdout.unmasked" "$needle" "a token on stdout"
   done
 }

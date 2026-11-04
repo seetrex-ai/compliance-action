@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Test shim for `tar`: logs every call, then runs the real tar with the same
+# arguments. One line per call in $SEETREX_TEST_SHIM_DIR/tar.log (its
+# arguments); without a state directory it only runs the real tar (the fake
+# Trivy tarball is built before setup_case exports one).
+#
+# The real tar is the first `tar` on PATH outside this shim's own directory,
+# found by absolute path, so the shim never calls itself.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+state="${SEETREX_TEST_SHIM_DIR:-}"
+if [ -n "$state" ] && [ -d "$state" ]; then
+  printf '%s\n' "$*" >> "$state/tar.log"
+fi
+
+real=""
+IFS=: read -r -a dirs <<< "$PATH"
+for d in "${dirs[@]}"; do
+  if [ -z "$d" ] || [ ! -d "$d" ]; then
+    continue
+  fi
+  if [ "$(cd "$d" && pwd -P)" = "$here" ]; then
+    continue
+  fi
+  if [ -f "$d/tar" ] && [ -x "$d/tar" ]; then
+    real="$d/tar"
+    break
+  fi
+done
+if [ -z "$real" ]; then
+  printf 'tar shim: no real tar on PATH\n' >&2
+  exit 127
+fi
+exec "$real" "$@"

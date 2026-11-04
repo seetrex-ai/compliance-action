@@ -110,7 +110,7 @@
 #                              and the last one repeats
 #   set_api_transport_error [curl_exit]  queues a transport failure (no
 #                              body, write-out 000, exit curl_exit, default 7)
-#   reset_logs                 truncates the curl/sleep/trivy logs, the trivy
+#   reset_logs                 truncates the curl/sleep/tar/trivy logs, the trivy
 #                              marker, stdout/stderr, summary and output files
 #                              (queued API answers are kept)
 #
@@ -137,10 +137,12 @@
 #   token_call_count           calls to the OIDC token URL
 #   download_call_count        calls to the Trivy release URL
 #   sleep_log / sleep_count    the sleep shim's log / number of sleeps
+#   tar_count                  number of tar invocations (tests/shims/tar)
 #   trivy_ran                  status 0 iff the fake trivy was executed at all
 #   trivy_invocations          number of trivy invocations
 #   trivy_args <n>             args of invocation n, one per line
 #   trivy_cwd <n>              cwd of invocation n
+#   trivy_home <n>             value of HOME seen by invocation n
 #   trivy_env <n>              env var NAMES seen by invocation n, one per line
 #   github_output_value <key>  value of key=value in $GITHUB_OUTPUT (single-line)
 #
@@ -172,14 +174,16 @@
 #   curl/<n>/exit     curl exit code returned
 #   curl/<n>/user     only if -u/--user was passed
 #   sleep.log         one line per sleep: its arguments
-#   trivy.log         per invocation: "invocation", "cwd <dir>", one
-#                     "arg <a>" per argument, one "env <NAME>" per env var,
-#                     "end"
+#   tar.log           one line per tar call: its arguments (the shim then
+#                     execs the real tar)
+#   trivy.log         per invocation: "invocation", "cwd <dir>",
+#                     "home <HOME>", one "arg <a>" per argument, one
+#                     "env <NAME>" per env var, "end"
 #   trivy.ran         exists iff the fake trivy ran (even for --version)
 #
 # FIXED LINES (verbatim from the plan §1; run.sh must print these exactly)
 #   L_PUBLIC L_NOT_PUSH L_NON_DEFAULT L_401 L_LEFT_OUT L_TOO_LARGE
-#   L_TRIVY_SHA L_NO_OIDC
+#   L_TRIVY_SHA L_NO_OIDC; plus L_HEAD_NOT_SHA (added by the D1 review)
 #
 # CONSTANTS
 #   FAKE_JWT FAKE_REQUEST_TOKEN TEST_REPO_ID TEST_OWNER_ID TOKEN_URL
@@ -215,6 +219,9 @@ L_TOO_LARGE='The SBOM and attestations do not fit in one request even without th
 L_TRIVY_SHA='The Trivy download does not match its pinned sha256: nothing was scanned or sent.'
 # shellcheck disable=SC2034,SC2016  # literal backticks, no expansion wanted
 L_NO_OIDC='The workflow lacks `permissions: id-token: write`: nothing was sent.'
+# Not in the plan §1: added by the D1 review (A-I3), same form as the others.
+# shellcheck disable=SC2034
+L_HEAD_NOT_SHA='The checked-out commit is not the commit of this run (GITHUB_SHA): nothing was scanned or sent.'
 
 # ---------------------------------------------------------------- assertions
 
@@ -616,6 +623,7 @@ reset_logs() {
   rm -rf "$SHIM_STATE/curl" "$SHIM_STATE/trivy.ran"
   : > "$SHIM_STATE/curl.log"
   : > "$SHIM_STATE/sleep.log"
+  : > "$SHIM_STATE/tar.log"
   : > "$SHIM_STATE/trivy.log"
   : > "$RUN_STDOUT"
   : > "$RUN_STDERR"
@@ -722,6 +730,16 @@ sleep_count() {
   printf '%s\n' "$n"
 }
 
+tar_count() {
+  local n=0 line
+  if [ -f "$SHIM_STATE/tar.log" ]; then
+    while IFS= read -r line; do
+      n=$((n + 1))
+    done < "$SHIM_STATE/tar.log"
+  fi
+  printf '%s\n' "$n"
+}
+
 trivy_ran() {
   [ -f "$SHIM_STATE/trivy.ran" ]
 }
@@ -759,6 +777,10 @@ trivy_args() {
 
 trivy_cwd() {
   _trivy_field "$1" cwd
+}
+
+trivy_home() {
+  _trivy_field "$1" home
 }
 
 trivy_env() {

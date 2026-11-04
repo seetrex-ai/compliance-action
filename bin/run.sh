@@ -27,6 +27,9 @@
 #   the reduced vulnerability report (also when it is left out). No name,
 #   identifier or package of a finding is ever printed.
 # A missing filter stops the run before anything is downloaded or sent.
+# Tracing off first: a BASH_ENV or SHELLOPTS that turns on xtrace would print
+# the request token and the JWT to the log (action.yml also unsets BASH_ENV).
+set +x
 set -euo pipefail
 umask 077
 
@@ -45,6 +48,7 @@ L_TOO_LARGE='The SBOM and attestations do not fit in one request even without th
 L_TRIVY_SHA='The Trivy download does not match its pinned sha256: nothing was scanned or sent.'
 # shellcheck disable=SC2016  # literal backticks
 L_NO_OIDC='The workflow lacks `permissions: id-token: write`: nothing was sent.'
+L_HEAD_NOT_SHA='The checked-out commit is not the commit of this run (GITHUB_SHA): nothing was scanned or sent.'
 
 WORK=""
 cleanup() {
@@ -180,7 +184,7 @@ fetch_token() {
   esac
   printf 'Authorization: Bearer %s\n' "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" > "$WORK/token-request.hdr"
   chmod 600 "$WORK/token-request.hdr"
-  code="$(curl -sS --proto '=https' --max-time 30 -H @"$WORK/token-request.hdr" \
+  code="$(curl -q -sS --proto '=https' --max-time 30 -H @"$WORK/token-request.hdr" \
     -o "$WORK/token.json" -w '%{http_code}' \
     "${ACTIONS_ID_TOKEN_REQUEST_URL}${sep}${AUDIENCE_QUERY}")" || rc=$?
   rm -f -- "$WORK/token-request.hdr"
@@ -205,7 +209,7 @@ HTTP=""
 post_once() {
   local code rc=0
   rm -f -- "$WORK/resp"
-  code="$(curl -sS --proto '=https' --max-time 60 -H @"$WORK/auth.hdr" \
+  code="$(curl -q -sS --proto '=https' --max-time 60 -H @"$WORK/auth.hdr" \
     -H 'Content-Type: application/json' --data-binary @"$WORK/body.json" \
     -o "$WORK/resp" -w '%{http_code}' "$PUSH_URL")" || rc=$?
   if [ "$rc" -ne 0 ] || ! [[ "$code" =~ ^[1-5][0-9][0-9]$ ]]; then
@@ -328,6 +332,10 @@ for f in sbom trivy body_check summary_full summary_counters dry_run; do
 done
 git -C "$GITHUB_WORKSPACE" cat-file -e "$GITHUB_SHA^{commit}" 2> /dev/null \
   || die "The commit of this run is not checked out in the workspace (run actions/checkout first): nothing was scanned or sent."
+# Trivy scans the worktree, so the worktree must be the commit of the run.
+head_sha="$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD 2> /dev/null || true)"
+head_sha="${head_sha%$'\r'}"
+[ "$head_sha" = "$GITHUB_SHA" ] || die "$L_HEAD_NOT_SHA"
 
 # ---------------------------------------------------------- 9. Trivy pin
 pin="${GITHUB_ACTION_PATH:-}/bin/trivy.pin"
@@ -356,7 +364,7 @@ case "$(uname -m)" in
 esac
 
 trivy_url="https://github.com/aquasecurity/trivy/releases/download/v${trivy_version}/trivy_${trivy_version}_${asset}.tar.gz"
-curl -fsSL --proto '=https' --max-time 300 -o "$WORK/trivy.tar.gz" "$trivy_url" \
+curl -q -fsSL --proto '=https' --max-time 300 -o "$WORK/trivy.tar.gz" "$trivy_url" \
   || die "The Trivy download failed: nothing was scanned or sent."
 printf '%s  trivy.tar.gz\n' "$want_sha" > "$WORK/trivy.sha256"
 # The checksum is verified BEFORE anything is extracted.
@@ -373,7 +381,9 @@ chmod 700 "$TRIVY"
 # Trivy sees a minimal environment (no runner tokens) and writes under WORK.
 CACHE_DIR="$RUNNER_TEMP/seetrex-trivy-cache"
 mkdir -p "$CACHE_DIR"
-scan_env=(PATH="$PATH" HOME="${HOME:-/tmp}" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-C.UTF-8}")
+# HOME is an empty directory of the run, so no user config reaches Trivy.
+mkdir "$WORK/home"
+scan_env=(PATH="$PATH" HOME="$WORK/home" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-C.UTF-8}")
 for v in HTTPS_PROXY HTTP_PROXY NO_PROXY https_proxy http_proxy no_proxy; do
   if [ -n "${!v:-}" ]; then
     scan_env+=("$v=${!v}")

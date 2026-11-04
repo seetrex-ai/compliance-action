@@ -32,11 +32,18 @@ outputs:
 runs:
   using: composite
   steps:
+    # The cache key changes once a day (UTC): one saved database per day, and
+    # restore-keys picks up the latest one of an earlier day.
+    - name: Date of the Trivy database cache
+      id: seetrex-day
+      shell: bash
+      run: date -u +day=%Y-%m-%d >> "$GITHUB_OUTPUT"
+
     - name: Cache the Trivy vulnerability database
       uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: ${{ runner.temp }}/seetrex-trivy-cache
-        key: seetrex-trivy-db-${{ runner.os }}-${{ runner.arch }}-${{ github.run_id }}
+        key: seetrex-trivy-db-${{ runner.os }}-${{ runner.arch }}-${{ steps.seetrex-day.outputs.day }}
         restore-keys: |
           seetrex-trivy-db-${{ runner.os }}-${{ runner.arch }}-
 
@@ -49,7 +56,9 @@ runs:
         INPUT_STRICT: ${{ inputs.strict }}
         INPUT_REQUEST_REPIN: ${{ inputs.request-repin }}
         INPUT_REQUEST_CLOSE: ${{ inputs.request-close }}
-      run: bash "$GITHUB_ACTION_PATH/bin/run.sh"
+      # BASH_ENV is dropped so that no file it names runs (or turns on
+      # tracing) inside the step; run.sh also turns tracing off first.
+      run: env -u BASH_ENV bash "$GITHUB_ACTION_PATH/bin/run.sh"
 
     - name: Upload the Seetrex record
       if: always() && steps.seetrex.outputs.record != ''
@@ -59,7 +68,7 @@ runs:
         path: ${{ steps.seetrex.outputs.record }}
         if-no-files-found: error
 
-    - name: Remove the Seetrex output directory
+    - name: Remove the Seetrex output and work directories
       if: always()
       shell: bash
-      run: rm -rf -- "$RUNNER_TEMP/seetrex-out"
+      run: rm -rf -- "$RUNNER_TEMP/seetrex-out" "$RUNNER_TEMP"/seetrex-work.*

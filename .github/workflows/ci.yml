@@ -33,10 +33,8 @@ jobs:
   trivy-pin:
     # The only job with network: downloads the pinned Trivy release from
     # github.com and checks it against bin/trivy.pin and the release's own
-    # checksums file. Non-blocking for now: whether it gates is for the
-    # reviewers to decide (plan §4).
+    # checksums file. Blocking: a pin that does not match fails the run.
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -64,7 +62,7 @@ jobs:
           farm="trivy_${v}_Linux-ARM64.tar.gz"
           sums="trivy_${v}_checksums.txt"
           for f in "$f64" "$farm" "$sums"; do
-            curl -fsSL --proto '=https' --max-time 300 -o "$dir/$f" "$base/$f"
+            curl -q -fsSL --proto '=https' --max-time 300 -o "$dir/$f" "$base/$f"
           done
           printf '%s  %s\n%s  %s\n' "$sha_64" "$f64" "$sha_arm" "$farm" > "$dir/pinned.sha256"
           ( cd "$dir" && sha256sum -c pinned.sha256 )
