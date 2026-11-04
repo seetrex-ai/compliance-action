@@ -14,9 +14,15 @@ branch, or any other event, sends nothing), the Action runs in your own runner,
 builds a component inventory (CycloneDX SBOM) and a vulnerability scan (Trivy),
 picks up the attestation files you keep in `.seetrex/attestations/`, and sends
 the three to Seetrex. What it scans is exactly the pushed commit
-(`GITHUB_SHA`), copied out of the repository: files modified, staged or added
-in the working directory by earlier steps of the job are not scanned, and the
-repository's own `trivy.yaml` and `.trivyignore` are not applied. Seetrex
+(`GITHUB_SHA`), each file copied byte for byte from the commit's objects:
+files modified, staged or added in the working directory by earlier steps of
+the job are not scanned; no `.gitattributes`, line-ending setting, filter or
+`git replace` changes what is read; and the repository's own `trivy.yaml` and
+`.trivyignore` are not applied. Files stored with Git LFS are scanned as the
+pointer text that is committed, submodules are not scanned, and symbolic links
+are skipped. With a partial or sparse clone (for example `filter: blob:none`
+in `actions/checkout`), the Action never fetches a missing file from your
+remote: the run stops and nothing is scanned or sent. Seetrex
 evaluates them deterministically against a rule catalogue derived from the
 Cyber Resilience Act (CRA) and appends the outcome to a hash-chained,
 append-only record kept for your repository.
@@ -107,7 +113,10 @@ database downloads, from Trivy's default registries (`mirror.gcr.io`, then
 `ghcr.io`; we have not measured every host involved, and the registries may
 redirect the download of the database layers to further hosts of their own);
 the runner's OIDC token service; and the GitHub Actions cache and artifact
-services (the database cache and the `seetrex-record.json` upload).
+services (the database cache and the `seetrex-record.json` upload). The
+step that restores the Trivy database cache runs before the Action's own
+checks (private repository, push, default branch), so it runs even on a run
+that those checks then stop.
 
 ## What Seetrex can and cannot do with it
 

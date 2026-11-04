@@ -4,7 +4,7 @@ author: Seetrex
 
 inputs:
   dry-run:
-    description: Scan and describe what would be sent (files, sizes, sha256), without requesting a token or sending anything.
+    description: Scan and describe what would be sent (files, sizes, sha256), without requesting a token or sending anything to Seetrex.
     required: false
     default: 'false'
   summary:
