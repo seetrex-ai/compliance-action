@@ -1,0 +1,9 @@
+{
+  "format": "seetrex.attestation.v1",
+  "category": "fixture_policy_pretty",
+  "statement": "Fixture attestation, pretty-printed over several lines.",
+  "evidence": [
+    "first line of evidence",
+    "second line of evidence"
+  ]
+}

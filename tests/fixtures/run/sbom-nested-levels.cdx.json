@@ -1,0 +1,16 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "metadata": {"component": {"bom-ref": "fixture-root", "type": "application", "name": "."}},
+  "components": [
+    {"bom-ref": "a", "type": "library", "name": "fixture-a", "version": "1.0.0",
+     "components": [
+       {"bom-ref": "a1", "type": "library", "name": "fixture-a1", "version": "1.0.0",
+        "components": [
+          {"bom-ref": "a1x", "type": "library", "name": "fixture-a1x", "version": "1.0.0"}
+        ]},
+       {"bom-ref": "a2", "type": "library", "name": "fixture-a2", "version": "1.0.0"}
+     ]},
+    {"bom-ref": "b", "type": "library", "name": "fixture-b", "version": "1.0.0"}
+  ]
+}

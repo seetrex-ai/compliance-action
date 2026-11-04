@@ -320,6 +320,12 @@ test_intent_run_step_drops_bash_env_and_cleans_up__static() {
   sed -n '/^    - name: Remove the Seetrex output and work directories$/,/^    - /p' \
     "$ACTION_ROOT/action.yml" > "$TEST_TMP/cleanup-step"
   assert_line_eq "$TEST_TMP/cleanup-step" '      if: always()' "the cleanup step runs always"
+  # The upload runs even when run.sh failed after writing the record (a
+  # summary that could not be rendered, review A-M5 of the third review).
+  sed -n '/^    - name: Upload the Seetrex record$/,/^    - /p' \
+    "$ACTION_ROOT/action.yml" > "$TEST_TMP/upload-step"
+  assert_line_eq "$TEST_TMP/upload-step" "      if: always() && steps.seetrex.outputs.record != ''" \
+    "the upload step runs always when there is a record"
   # No `record` output of the Action: the cleanup step deletes the file it
   # would name (review A-I8); the upload step reads the step's own output.
   assert_eq 0 "$(grep -c '^outputs:' "$ACTION_ROOT/action.yml" || true)" "action.yml declares no outputs"

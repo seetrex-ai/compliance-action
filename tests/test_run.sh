@@ -145,6 +145,39 @@ test_intent_attestations_read_from_commit_tree() {
   assert_rc 1
   assert_eq 0 "$(api_call_count)" "33 attestations: no POST"
   assert_eq 0 "$(token_call_count)" "33 attestations: no token"
+
+  # Exactly 32 (one commit): all are sent (review A-M4).
+  setup_case
+  mkdir -p "$WS/.seetrex/attestations"
+  for ((i = 1; i <= 32; i++)); do
+    cp "$FIXTURES_RUN/attestation-a.json" "$WS/.seetrex/attestations/a$i.json"
+  done
+  git -C "$WS" add -A
+  git -C "$WS" commit -q -m "32 attestations"
+  GITHUB_SHA="$(git -C "$WS" rev-parse HEAD | tr -d '\r')"
+  export GITHUB_SHA
+  make_event private
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  run_action
+  assert_rc 0
+  assert_json "$(_last_api_body)" '.attestations | length == 32' "32 attestations: all sent"
+
+  # A pretty-printed attestation (several lines) travels as one string, byte
+  # for byte (review A-I4 of the third review): sha256 of the committed file
+  # = sha256 of the string sent (jq on Windows writes CRLF; the fixture has
+  # no CR, so CRs are dropped before hashing).
+  setup_case
+  commit_attestation "$FIXTURES_RUN/attestation-pretty.json" pretty.json
+  make_event private
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  run_action
+  assert_rc 0
+  body="$(_last_api_body)"
+  assert_json "$body" '.attestations | length == 1' "pretty: one attestation"
+  jq -j '.attestations[0]' "$body" > "$CASE_DIR/sent.raw"
+  tr -d '\r' < "$CASE_DIR/sent.raw" > "$CASE_DIR/sent.json"
+  assert_eq "$(_sha "$FIXTURES_RUN/attestation-pretty.json")" "$(_sha "$CASE_DIR/sent.json")" \
+    "pretty: the string sent is the committed file, byte for byte"
 }
 
 test_intent_action_never_sends_user_identity() {
@@ -348,6 +381,63 @@ test_intent_dry_run_contacts_no_seetrex_endpoint_and_no_oidc() {
   assert_line_eq "$RUN_STDOUT" "$L_NO_OIDC" "no permission: fixed line"
   assert_eq 0 "$(api_call_count)" "no permission: no Seetrex call"
   assert_eq 0 "$(token_call_count)" "no permission: no token call"
+
+  # Components nested two levels deep are counted at every level (review
+  # A-M6): 2 at the top, 2 under the first, 1 under that one's first.
+  setup_case
+  set_trivy_fixture cyclonedx "$FIXTURES_RUN/sbom-nested-levels.cdx.json"
+  run_action dry-run=true
+  assert_rc 0
+  assert_line_eq "$RUN_STDOUT" "- SBOM components (every level): 5" "nested component count"
+}
+
+test_intent_trivy_cache_dir_is_the_path_action_yml_caches() {
+  # INTENT: both scans use as --cache-dir the very directory the cache step of
+  # action.yml saves and restores, so the database downloaded by one push is
+  # the one the next push finds.
+  # CONTEXT: review A-I3 of the third review: nothing tied the two values.
+  # EXPIRES IF: the Action stops caching the Trivy database.
+  local path n
+  path="$(sed -n '/^    - name: Cache the Trivy vulnerability database$/,/^    - /s/^        path: //p' \
+    "$ACTION_ROOT/action.yml")"
+  path="${path%$'\r'}"
+  assert_eq '${{ runner.temp }}/seetrex-trivy-cache' "$path" "action.yml caches a directory under runner.temp"
+  setup_case
+  run_action dry-run=true
+  assert_rc 0
+  for n in 1 2; do
+    trivy_args "$n" > "$CASE_DIR/args-$n"
+    assert_eq "${path//'${{ runner.temp }}'/$RUNNER_TEMP}" \
+      "$(sed -n '/^--cache-dir$/{n;p;}' "$CASE_DIR/args-$n")" "scan $n: --cache-dir is the cached path"
+  done
+}
+
+test_intent_token_service_failures_send_nothing() {
+  # INTENT: an answer of the runner's token service that is not a 200 with a
+  # JWT-shaped `value` (a 500, a value that is not a JWT, a value with a
+  # newline) stops the run with a fixed line before anything is posted.
+  # CONTEXT: review A-I5 of the third review; a value with a newline would
+  # otherwise inject a header line into the request.
+  # EXPIRES IF: the Action stops using the runner's OIDC token.
+  local kind
+  setup_case
+  printf '{"value":"not-a-jwt"}\n' > "$CASE_DIR/token-plain"
+  jq -n --arg v "$FAKE_JWT" '{value: ($v + "\nX-Injected: 1")}' > "$CASE_DIR/token-newline"
+  printf '{"value":"%s"}\n' "$FAKE_JWT" > "$CASE_DIR/token-500"
+  set_api_response 200 "$FIXTURES_RUN/resp-200.json"
+  for kind in plain newline 500; do
+    if [ "$kind" = 500 ]; then
+      set_token_response 500 "$CASE_DIR/token-$kind"
+    else
+      set_token_response 200 "$CASE_DIR/token-$kind"
+    fi
+    reset_logs
+    run_action
+    assert_rc 1
+    assert_line_eq "$RUN_STDOUT" "The OIDC token could not be obtained from the runner: nothing was sent." "$kind: fixed line"
+    assert_eq 1 "$(token_call_count)" "$kind: one token request"
+    assert_eq 0 "$(api_call_count)" "$kind: no POST"
+  done
 }
 
 test_intent_non_default_ref_sends_nothing() {
