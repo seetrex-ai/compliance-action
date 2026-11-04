@@ -391,10 +391,16 @@ test_intent_executable_files_keep_their_bit_in_the_index() {
   # CONTEXT: D1 debt: the bit lives only in git's index; a commit from a
   # checkout without core.fileMode (Windows) can drop it unnoticed.
   # EXPIRES IF: the listed files are moved or are no longer run as commands.
-  local f mode out
+  # Every file under tests/shims/ is taken from the index, so a new shim is
+  # covered without editing this list.
+  local f mode out shims=()
   out="$TEST_TMP/ls-files"
   git -C "$ACTION_ROOT" ls-files -s -- bin tests > "$out"
-  for f in bin/run.sh tests/run_all.sh tests/shims/curl tests/shims/sleep tests/shims/tar \
+  while IFS= read -r f; do
+    shims+=("$f")
+  done < <(awk '{ sub(/\r$/, "") } $NF ~ /^tests\/shims\// { print $NF }' "$out")
+  assert_ne 0 "${#shims[@]}" "tests/shims/ holds files in the git index"
+  for f in bin/run.sh tests/run_all.sh tests/shims/curl tests/shims/sleep tests/shims/tar "${shims[@]}" \
     tests/fixtures/common/build-fake-trivy.sh tests/fixtures/common/fake-trivy.sh; do
     mode="$(awk -v p="$f" '{ sub(/\r$/, "") } $NF == p { print $1 }' "$out")"
     assert_eq 100755 "$mode" "$f is executable in the git index"
