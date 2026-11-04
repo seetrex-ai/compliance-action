@@ -20,9 +20,12 @@ the job are not scanned; no `.gitattributes`, line-ending setting, filter or
 `git replace` changes what is read; and the repository's own `trivy.yaml` and
 `.trivyignore` are not applied. Files stored with Git LFS are scanned as the
 pointer text that is committed, submodules are not scanned, and symbolic links
-are skipped. With a partial or sparse clone (for example `filter: blob:none`
-in `actions/checkout`), the Action never fetches a missing file from your
-remote: the run stops and nothing is scanned or sent. Seetrex
+are skipped. The Action never fetches a missing file from your remote. A
+partial clone (for example `filter: blob:none` in `actions/checkout`) that
+checked out the pushed commit already holds all of its files and is scanned
+as usual; when a file of the pushed commit is missing from the clone, as with
+a sparse checkout that leaves part of the tree out, the run stops and nothing
+is scanned or sent. Seetrex
 evaluates them deterministically against a rule catalogue derived from the
 Cyber Resilience Act (CRA) and appends the outcome to a hash-chained,
 append-only record kept for your repository.

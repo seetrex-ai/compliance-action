@@ -1264,7 +1264,8 @@ test_intent_scanned_tree_refuses_an_absolute_path() {
 test_intent_partial_clone_fails_closed_without_fetching() {
   # INTENT: a blob of GITHUB_SHA missing from a partial clone is never fetched
   # from the repository's remote: the run stops with a fixed line, scans and
-  # sends nothing.
+  # sends nothing. A partial clone that holds every blob of the commit (no
+  # sparse checkout) is scanned as usual, as the README says.
   # CONTEXT: review A-M3 of D1 (checkout with `filter: blob:none` and a
   # sparse checkout); the README lists every network destination of a run.
   # EXPIRES IF: the Action fetches the commit itself.
@@ -1281,6 +1282,19 @@ test_intent_partial_clone_fails_closed_without_fetching() {
     "partial clone: fixed line"
   if trivy_ran; then fail "partial clone: trivy ran"; fi
   assert_eq 0 "$(curl_count)" "partial clone: no request"
+
+  # The same partial clone without sparse checkout: checking out the commit
+  # brought every blob of its tree, so nothing is missing and the commit is
+  # scanned as usual (README: "already holds all of its files").
+  rm -rf "$CASE_DIR/partial"
+  git clone -q --filter=blob:none "file://$WS" "$CASE_DIR/partial" 2> /dev/null
+  reset_logs
+  run_action dry-run=true
+  assert_rc 0
+  assert_eq 2 "$(trivy_invocations)" "partial clone, not sparse: two scans"
+  trivy_files 1 > "$CASE_DIR/files-1"
+  assert_line_eq "$CASE_DIR/files-1" "src/nested.txt $(_sha "$CASE_DIR/nested.txt")" \
+    "partial clone, not sparse: the nested file is scanned"
 }
 
 test_intent_trivy_runs_offline_without_telemetry_and_with_an_empty_home() {
