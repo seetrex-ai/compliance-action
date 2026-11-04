@@ -381,3 +381,22 @@ test_intent_secrets_stay_private_masked_and_https_only__static() {
     assert_contains "$line" "--proto '=https'" "ci.yml: https only: $line"
   done < "$TEST_TMP/ci-run"
 }
+
+test_intent_executable_files_keep_their_bit_in_the_index() {
+  # INTENT: the files that are run as commands are committed with mode 100755,
+  # so a fresh checkout on Linux can execute them: the shims are found on PATH
+  # only if executable (without the bit the real curl, sleep and tar would run
+  # and reach the network), run.sh and run_all.sh are the documented entry
+  # points, and the fake Trivy scripts are the harness's own commands.
+  # CONTEXT: D1 debt: the bit lives only in git's index; a commit from a
+  # checkout without core.fileMode (Windows) can drop it unnoticed.
+  # EXPIRES IF: the listed files are moved or are no longer run as commands.
+  local f mode out
+  out="$TEST_TMP/ls-files"
+  git -C "$ACTION_ROOT" ls-files -s -- bin tests > "$out"
+  for f in bin/run.sh tests/run_all.sh tests/shims/curl tests/shims/sleep tests/shims/tar \
+    tests/fixtures/common/build-fake-trivy.sh tests/fixtures/common/fake-trivy.sh; do
+    mode="$(awk -v p="$f" '{ sub(/\r$/, "") } $NF == p { print $1 }' "$out")"
+    assert_eq 100755 "$mode" "$f is executable in the git index"
+  done
+}
