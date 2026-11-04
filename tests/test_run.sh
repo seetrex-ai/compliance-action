@@ -456,12 +456,14 @@ test_intent_trivy_cache_dir_is_the_path_action_yml_caches() {
   path="$(sed -n '/^    - name: Cache the Trivy vulnerability database$/,/^    - /s/^        path: //p' \
     "$ACTION_ROOT/action.yml")"
   path="${path%$'\r'}"
+  # shellcheck disable=SC2016  # the literal action.yml expression
   assert_eq '${{ runner.temp }}/seetrex-trivy-cache' "$path" "action.yml caches a directory under runner.temp"
   setup_case
   run_action dry-run=true
   assert_rc 0
   for n in 1 2; do
     trivy_args "$n" > "$CASE_DIR/args-$n"
+    # shellcheck disable=SC2016  # the literal action.yml expression
     assert_eq "${path//'${{ runner.temp }}'/$RUNNER_TEMP}" \
       "$(sed -n '/^--cache-dir$/{n;p;}' "$CASE_DIR/args-$n")" "scan $n: --cache-dir is the cached path"
   done
@@ -935,7 +937,7 @@ _assert_call_bounded() {
     line="${line%$'\r'}"
     [ -n "$first" ] || first="$line"
     if [ "$prev" = --max-time ]; then
-      max="$max[$line]"
+      max="${max}[$line]"
     fi
     if [ "$prev" = --proto ] && [ "$line" = '=https' ]; then
       proto=1
@@ -1563,7 +1565,9 @@ test_intent_skipped_categories_are_echoed_only_as_plain_tokens() {
     assert_file_not_contains "$RUN_STDOUT" "$v" "stdout carries [$v]"
     assert_file_not_contains "$GITHUB_STEP_SUMMARY" "$v" "summary carries [$v]"
   done
+  # shellcheck disable=SC2016  # literal backticks
   assert_file_not_contains "$GITHUB_STEP_SUMMARY" '`a`' "summary names a split token"
+  # shellcheck disable=SC2016  # literal backticks
   assert_file_not_contains "$GITHUB_STEP_SUMMARY" '`b`' "summary names a split token"
 }
 

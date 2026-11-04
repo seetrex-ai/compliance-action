@@ -210,6 +210,7 @@ FAKE_REQUEST_TOKEN='fake-oidc-request-token-7f3a'
 TEST_REPO_ID=987654321
 TEST_OWNER_ID=123456789
 TOKEN_URL='https://token.invalid/x?a=1'
+# shellcheck disable=SC2034  # read by the test files that source this one
 SEETREX_PUSH_URL='https://api.seetrex.com/v1/action/push'
 TRIVY_DOWNLOAD_PREFIX='https://github.com/aquasecurity/trivy/releases/download/'
 
@@ -507,6 +508,7 @@ setup_case() {
 make_event() {
   local kind="${1:-private}" db="${2:-main}"
   local base
+  # shellcheck disable=SC2016  # a jq program: $ref and $sha are jq variables
   base='{
     ref: $ref, after: $sha,
     repository: {

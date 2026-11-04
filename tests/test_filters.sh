@@ -1,4 +1,6 @@
-# shellcheck shell=bash
+# shellcheck shell=bash disable=SC2016
+# (SC2016 is off for this file: its single-quoted strings are literal Markdown
+# rows with backticks, compared as text, never meant to expand.)
 # Filter-level tests of bin/filters/*.jq: each filter is run on its own, with
 # the exact invocation documented at the top of the .jq file (the one
 # bin/run.sh uses), over the synthetic fixtures of tests/fixtures/filters/.

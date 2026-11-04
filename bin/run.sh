@@ -53,6 +53,7 @@ L_TRIVY_SHA='The Trivy download does not match its pinned sha256: nothing was sc
 L_NO_OIDC='The workflow lacks `permissions: id-token: write`: nothing was sent.'
 
 WORK=""
+# shellcheck disable=SC2317  # runs from the EXIT trap below
 cleanup() {
   if [ -n "$WORK" ] && [ -d "$WORK" ]; then
     rm -rf -- "$WORK"

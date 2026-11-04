@@ -27,6 +27,7 @@ _static_assert_absent() {
 _static_check_uses() {
   local file="$1" total=0 parsed=0 line val
   assert_file_exists "$file"
+  # shellcheck disable=SC2094  # $file is only read; basename never opens it
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%$'\r'}"
     [[ "$line" == *uses:* ]] || continue
@@ -145,7 +146,7 @@ test_intent_harness_fake_trivy_is_pinned_served_and_logged() {
   printf '{"metadata":{"component":{"name":"@CWD@","purl":"@SCANARG@"}}}\n' > "$CASE_DIR/cdx.json"
   set_trivy_fixture cyclonedx "$CASE_DIR/cdx.json"
   (
-    cd "$WS"
+    cd "$WS" || exit 1
     env -i PATH="$PATH" HOME="$HOME" "$RUNNER_TEMP/trivy-bin/trivy" fs --scanners vuln \
       --format json --quiet --output "$RUNNER_TEMP/out.json" .
     env -i PATH="$PATH" HOME="$HOME" "$RUNNER_TEMP/trivy-bin/trivy" fs \

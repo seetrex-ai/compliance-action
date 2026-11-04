@@ -82,6 +82,7 @@ for f in "${files[@]}"; do
 
     test_tmp="$(mktemp -d)"
     log="$test_tmp.log"
+    # shellcheck disable=SC2016  # the inner script expands its own $1..$3 and $TEST_TMP
     runner=(bash -c '
       set -euo pipefail
       cd "$TEST_TMP"
