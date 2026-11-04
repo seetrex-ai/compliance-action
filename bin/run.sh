@@ -281,8 +281,9 @@ handle_failure() {
         die "Seetrex does not support this repository (400): nothing was recorded."
       fi
       say "Seetrex rejected the request as malformed (400): nothing was recorded."
-      msg="$(jq -r --arg re "^[a-z0-9 ,.'-]{1,120}\$" \
-        'if type == "object" then (.message | strings | select(test($re))) else empty end' \
+      # Shown only if the whole message, as it would be printed, is short
+      # plain text (bash's `$` is the end of the string, newlines included).
+      msg="$(jq -r 'if type == "object" then (.message | strings) else empty end' \
         "$WORK/resp" 2> /dev/null || true)"
       msg="${msg%$'\r'}"
       local re="^[a-z0-9 ,.'-]{1,120}\$"
