@@ -186,8 +186,10 @@
 #   trivy.log         per invocation: "invocation", "cwd <dir>",
 #                     "home <HOME>", one "arg <a>" per argument, one
 #                     "env <NAME>" per env var, one "file <relpath> <sha256>"
-#                     per file under its cwd (.git/ excluded), "reads config
-#                     <f>" / "reads ignorefile <f>" when the file real Trivy
+#                     per file under its cwd (.git/ excluded), one "seen
+#                     <relpath>" per file under its cwd (.git/ included),
+#                     "reads config <f>" / "reads ignorefile <f>" when the
+#                     file real Trivy
 #                     would read from its cwd exists, "end"
 #   trivy.ran         exists iff the fake trivy ran (even for --version)
 #

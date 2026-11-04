@@ -1220,7 +1220,10 @@ _literal_tree() {
 
 # _run_crafted_tree <tree> <label> <marker>: commits <tree> as GITHUB_SHA,
 # runs a dry run and asserts the path rule refused it: exit 1, the fixed
-# line, no scan, no request, and no file named <marker> written anywhere.
+# line, no scan, no request, and no file named <marker> ever put in front of
+# Trivy (any invocation, .git/ included). A file written under the scanned
+# tree cannot be looked for after the run: run.sh deletes its work directory
+# on exit.
 _run_crafted_tree() {
   local tree="$1" label="$2" marker="$3"
   GITHUB_SHA="$(git -C "$WS" commit-tree -m crafted "$tree" | tr -d '\r')"
@@ -1233,39 +1236,45 @@ _run_crafted_tree() {
     "$label: fixed line"
   if trivy_ran; then fail "$label: trivy ran"; fi
   assert_eq 0 "$(curl_count)" "$label: no request"
-  assert_eq "" "$(find "$CASE_DIR" -name "$marker" -print)" "$label: a file was written"
+  assert_file_not_contains "$SHIM_STATE/trivy.log" "$marker" "$label: the file reached Trivy"
 }
 
 test_intent_scanned_tree_refuses_a_dot_component() {
-  # INTENT: a commit whose tree has an entry named `.` (path `./x`) is refused
-  # before anything is written or scanned, like a `..` component.
+  # INTENT: a commit whose tree has an entry named `.`, at the root (`./x`) or
+  # below it (`sub/./x`), is refused before anything is written or scanned,
+  # like a `..` component.
   # CONTEXT: D1 debt: of the five path rules of run.sh (`.`, `..`, `.git`,
   # empty component, absolute) only `..` had a test. git never checks such a
   # path out; a crafted commit can still carry it.
   # EXPIRES IF: the Action stops materialising the commit's tree itself.
-  local blob inner top
+  local blob inner dot top
   setup_case
   blob="$(printf 'dot\n' | git -C "$WS" hash-object -w --stdin | tr -d '\r')"
   inner="$(printf '100644 blob %s\tdot-4e1\n' "$blob" | git -C "$WS" mktree | tr -d '\r')"
-  top="$(printf '040000 tree %s\t.\n' "$inner" | git -C "$WS" mktree | tr -d '\r')"
-  _run_crafted_tree "$top" "dot component" dot-4e1
+  dot="$(printf '040000 tree %s\t.\n' "$inner" | git -C "$WS" mktree | tr -d '\r')"
+  _run_crafted_tree "$dot" "dot component" dot-4e1
+  top="$(printf '040000 tree %s\tsub-4e1\n' "$dot" | git -C "$WS" mktree | tr -d '\r')"
+  _run_crafted_tree "$top" "nested dot component" dot-4e1
 }
 
 test_intent_scanned_tree_refuses_a_dot_git_component() {
   # INTENT: a commit whose tree has a `.git` entry, in any case (`.git`,
-  # `.GiT`), is refused before anything is written or scanned: no file of a
-  # crafted commit lands in a `.git` directory of the scanned tree.
+  # `.GiT`), at the root or below it (`sub/.git/x`), is refused before
+  # anything is written or scanned: no file of a crafted commit lands in a
+  # `.git` directory of the scanned tree.
   # CONTEXT: D1 debt (see test_intent_scanned_tree_refuses_a_dot_component);
   # the rule lower-cases the path because case-insensitive filesystems treat
   # `.GiT` as `.git`.
   # EXPIRES IF: the Action stops materialising the commit's tree itself.
-  local blob inner top name
+  local blob inner git_dir top name
   for name in .git .GiT; do
     setup_case
     blob="$(printf 'git\n' | git -C "$WS" hash-object -w --stdin | tr -d '\r')"
     inner="$(printf '100644 blob %s\tconfig-5b3\n' "$blob" | git -C "$WS" mktree | tr -d '\r')"
-    top="$(printf '040000 tree %s\t%s\n' "$inner" "$name" | git -C "$WS" mktree | tr -d '\r')"
-    _run_crafted_tree "$top" "$name component" config-5b3
+    git_dir="$(printf '040000 tree %s\t%s\n' "$inner" "$name" | git -C "$WS" mktree | tr -d '\r')"
+    _run_crafted_tree "$git_dir" "$name component" config-5b3
+    top="$(printf '040000 tree %s\tsub-5b3\n' "$git_dir" | git -C "$WS" mktree | tr -d '\r')"
+    _run_crafted_tree "$top" "nested $name component" config-5b3
   done
 }
 
