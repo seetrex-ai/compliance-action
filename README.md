@@ -13,7 +13,10 @@ On every push to your repository's default branch (a push to any other
 branch, or any other event, sends nothing), the Action runs in your own runner,
 builds a component inventory (CycloneDX SBOM) and a vulnerability scan (Trivy),
 picks up the attestation files you keep in `.seetrex/attestations/`, and sends
-the three to Seetrex. Seetrex evaluates them deterministically against a rule
+the three to Seetrex. What it scans is exactly the pushed commit
+(`GITHUB_SHA`), copied out of the repository: files modified, staged or added
+in the working directory by earlier steps of the job are not scanned, and the
+repository's own `trivy.yaml` and `.trivyignore` are not applied. Seetrex evaluates them deterministically against a rule
 catalogue derived from the Cyber Resilience Act (CRA) and appends the outcome to
 a hash-chained, append-only record kept for your repository.
 
@@ -23,8 +26,9 @@ What you get back, in the same job:
   obligation and, for the current ones, their outcome; with
   `summary: counters`, only how many obligations are in each status, and no
   result;
-- `seetrex-record.json` as a run artifact: your whole record to date (the
-  chain, the results and, when available, the external anchoring proof).
+- `seetrex-record.json` as a run artifact, when Seetrex returns a record with
+  its answer: your whole record to date (the chain, the results and, when
+  available, the external anchoring proof).
 
 The record is tamper-evident and you can check its integrity without Seetrex,
 offline, with the open-source
@@ -65,7 +69,7 @@ jobs:
   record:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with: { persist-credentials: false }
       - uses: seetrex-ai/compliance-action@<sha> # v1.0.0
 ```
@@ -79,7 +83,9 @@ Sent to `api.seetrex.com`:
   `Metadata.Author`, `Metadata.Committer` and `Metadata.CommitMsg` are removed
   before sending;
 - the attestation files committed under `.seetrex/attestations/` at the pushed
-  commit;
+  commit: only `*.json` files directly in that directory (not in
+  subdirectories, not symbolic links), at most 32 (with more, nothing is
+  sent);
 - the OIDC token of the run, whose claims GitHub sets and the Action cannot
   trim: among them the `owner/repo` name, the numeric repository id and the
   numeric owner id, and also the login and the numeric id of the account that
@@ -96,8 +102,10 @@ anything else from the runner.
 Network destinations of a run, all over HTTPS: `api.seetrex.com`; the Trivy
 release download from `github.com` and the release-asset host it redirects to
 (on `githubusercontent.com`); the Trivy vulnerability database and Java
-database downloads (Trivy's defaults: `mirror.gcr.io`, then `ghcr.io`); the
-runner's OIDC token service; and the GitHub Actions cache and artifact
+database downloads, from Trivy's default registries (`mirror.gcr.io`, then
+`ghcr.io`; we have not measured every host involved, and the registries may
+redirect the download of the database layers to further hosts of their own);
+the runner's OIDC token service; and the GitHub Actions cache and artifact
 services (the database cache and the `seetrex-record.json` upload).
 
 ## What Seetrex can and cannot do with it
