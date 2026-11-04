@@ -555,9 +555,11 @@ write_dry_run_report() {
     # that is not an object, or a `components` that is not a list (Trivy
     # generates neither; the server refuses such an SBOM), makes the count a
     # fixed text instead of a number: the report still describes the body.
+    # `entries` only ever sees objects: sbom.jq refuses a non-object root and
+    # the recursion only descends into object entries.
     components="$(jq -r '
       def entries:
-        if type != "object" or .components == null then empty
+        if .components == null then empty
         elif (.components | type) != "array" then "bad"
         else .components[] | if type == "object" then "ok", entries else "bad" end
         end;

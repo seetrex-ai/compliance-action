@@ -425,6 +425,27 @@ test_intent_dry_run_counts_an_sbom_with_malformed_components_without_failing() {
   done
 }
 
+test_intent_sbom_whose_root_is_not_an_object_stops_the_run() {
+  # INTENT: an SBOM whose root is not a JSON object (`[]`) is refused by the
+  # reduction (sbom.jq) before anything else reads it: the run stops on a
+  # fixed line and sends nothing. The dry-run component count relies on it:
+  # it only ever sees an object root.
+  # CONTEXT: review round 2 of D1 (M-2): the count carried a guard for a
+  # non-object root that no input could reach, because sbom.jq refuses that
+  # root first; the guard was removed and this refusal is what is measured.
+  # EXPIRES IF: sbom.jq starts passing a non-object root on.
+  local mode
+  for mode in true false; do
+    setup_case
+    jq -n '[]' > "$CASE_DIR/sbom.json"
+    set_trivy_fixture cyclonedx "$CASE_DIR/sbom.json"
+    run_action dry-run="$mode"
+    assert_rc 1
+    assert_line_eq "$RUN_STDOUT" "The SBOM could not be reduced: nothing was sent." "dry-run=$mode: fixed line"
+    assert_eq 0 "$(api_call_count)" "dry-run=$mode: no Seetrex call"
+  done
+}
+
 test_intent_trivy_cache_dir_is_the_path_action_yml_caches() {
   # INTENT: both scans use as --cache-dir the very directory the cache step of
   # action.yml saves and restores, so the database downloaded by one push is
