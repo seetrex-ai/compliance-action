@@ -407,3 +407,39 @@ test_intent_executable_files_keep_their_bit_in_the_index() {
     assert_eq 100755 "$mode" "$f is executable in the git index"
   done
 }
+
+test_intent_public_texts_avoid_the_closed_list_of_claims() {
+  # INTENT: the README and action.yml never carry a claim the service does
+  # not make: a compliance verdict on the user ("CRA-ready", "compliant",
+  # "non-compliant"), exclusivity ("nobody else", "no one else"), a retention
+  # or a publication of results ("retained", "we keep your", "publish if you
+  # want", "Trust Center"), or an unqualified offline guarantee ("verifiable
+  # offline", "tamper-proof"). The list is closed, case insensitive, and read
+  # as plain text; a phrase the README needs in a negation ("no badge", "the
+  # only credential") is not on it.
+  # CONTEXT: external audit E of 2026-11-04 (C1, I1-I5) and plan E2+V2-b §5:
+  # the same list guards the presentation script.
+  # EXPIRES IF: the service starts making one of these claims for real, with
+  # its measure; then the phrase leaves the list in the same commit.
+  _static_action_files
+  assert_file_exists "$ACTION_ROOT/README.md" "README.md exists"
+  # Both sides are lower-cased with tr instead of grep -i: on some grep builds
+  # -i together with -F aborts, and a swallowed abort would read as 0 hits.
+  local phrase needle f hits rc
+  tr '[:upper:]' '[:lower:]' < "$ACTION_ROOT/README.md" > "$TEST_TMP/readme.lc"
+  tr '[:upper:]' '[:lower:]' < "$ACTION_ROOT/action.yml" > "$TEST_TMP/action.lc"
+  for phrase in 'CRA-ready' 'CRA ready' 'CRA compliant' 'CRA-compliant' \
+    'complies with the CRA' 'compliant with the CRA' 'non-compliant' 'you comply' \
+    'nobody else' 'no one else' \
+    'is retained' 'are retained' 'we keep your' 'we retain' \
+    'publish if you want' 'Trust Center' \
+    'verifiable offline' 'tamper-proof' 'tamperproof'; do
+    needle="$(printf '%s' "$phrase" | tr '[:upper:]' '[:lower:]')"
+    for f in readme action; do
+      rc=0
+      hits="$(grep -c -F -- "$needle" "$TEST_TMP/$f.lc")" || rc=$?
+      [ "$rc" -le 1 ] || fail "$f: grep failed (rc=$rc) on the phrase [$phrase]"
+      assert_eq 0 "${hits%$'\r'}" "$f: carries the phrase [$phrase]"
+    done
+  done
+}

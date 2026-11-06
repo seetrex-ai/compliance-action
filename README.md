@@ -1,11 +1,12 @@
 # Seetrex Compliance Action
 
-**Status: under construction, private preview.** The Action is not published
-yet: there is no release, no tag and no Marketplace listing. Access is not open
-yet: while we finish it, the server admits only repositories owned by the
-`seetrex-ai` organization, and there is no channel to request access. This
-README describes what the Action does when released, and nothing in it is a
-promise about a date.
+**Status: private preview.** The first release, `v1.0.0`, exists and is
+immutable: it points at commit `20dc0d2d4877be42203a9b2835486d0bab863b8d`, the
+code that was measured end to end on a private test repository on 2026-11-05
+and 2026-11-06. There is no Marketplace listing. Access is not open yet: while
+we finish the service, the server admits only repositories owned by the
+`seetrex-ai` organization, and there is no channel to request access. Nothing
+in this README is a promise about a date.
 
 ## What it does
 
@@ -47,8 +48,12 @@ offline, with the open-source
 [`seetrex-verifier`](https://github.com/seetrex-hq/seetrex-verifier)
 (`verify-record` checks the whole file, since `seetrex-verifier` 0.3.8,
 published 2026-11-03; `verify-chain` checks only the `chain` block, extract it
-first with `jq .chain seetrex-record.json > chain.json`). What that check proves, and what it does not, is
-stated below. Keep the file: GitHub expires run artifacts (90 days by
+first with `jq .chain seetrex-record.json > chain.json`). When the record
+carries an anchor proof, `verify-record` also needs the kit that pins the
+Seetrex keys (`--kit kit.json`); without it, or with a kit of the previous
+format, the tool exits 2 and says so. The kit for third-party records is not
+distributed yet. What that check proves, and what it does not, is stated
+below. Keep the file: GitHub expires run artifacts (90 days by
 default), and the next push brings the full record again.
 
 The Action does not replace Art. 14 vulnerability reporting, nor a conformity
@@ -69,9 +74,9 @@ write`), and that token is the only credential. The Action never reads
 
 ## Install
 
-Pinned by SHA once released; the `<sha>` placeholder of the Action is filled
-in by the first release (`v1.0.0`). There is no moving `v1` tag. In a private
-repository the job needs `actions/checkout` and both permissions below.
+Pinned by the commit SHA of release `v1.0.0`. There is no moving `v1` tag. In
+a private repository the job needs `actions/checkout` and both permissions
+below.
 
 ```yaml
 on: { push: { branches: [main] } }  # your default branch; update it if you rename it
@@ -83,7 +88,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with: { persist-credentials: false }
-      - uses: seetrex-ai/compliance-action@<sha> # v1.0.0
+      - uses: seetrex-ai/compliance-action@20dc0d2d4877be42203a9b2835486d0bab863b8d # v1.0.0
 ```
 
 ## What leaves your repository
@@ -142,9 +147,19 @@ Please read this before installing.
   altered or reordered. It does not prove, by itself, the date of a row,
   that no row is missing at the end, or that the human-readable columns of a
   row (rule set, outcome) are what the engine produced: those columns are
-  not inputs to the link. The first two need an external anchor; anchoring
-  of third-party records is planned and not available yet. Seetrex makes no
-  claim beyond what the tool prints: it reports what it checked, and you
+  not inputs to the link. The first two need an external anchor. Since
+  2026-11-05 the head of the chain that batches third-party records is
+  submitted every hour to a public transparency log (Sigsum), and the proof
+  travels inside `seetrex-record.json` (`anchor`). `verify-record --kit`
+  checks it offline and prints `ANCHOR: CONFIRMED OFFLINE through ordinal k
+  of N`: the rows up to `k` existed when the log's cosigned checkpoint was
+  made; the rows after `k` are linked to them and not anchored yet. Measured
+  on 2026-11-06 on a private test repository, in a container without network
+  access: exit 0, confirmed through ordinal 1 of 4. A confirmed anchor does
+  not prove completeness (nobody outside Seetrex can see that a repository
+  was left out of a batch), does not detect a chain cut back to the proved
+  row, and still says nothing about the human-readable columns. Seetrex makes
+  no claim beyond what the tool prints: it reports what it checked, and you
   read it.
 - **Nothing is deleted row by row.** The record is append-only by design. We
   intend to retire the whole record of a repository on request, through a
@@ -154,8 +169,9 @@ Please read this before installing.
   repository and not from an email. What has already been anchored
   externally, if anything, stays as an unlinkable hash.
 - **Visibility changes are your call.** If a private repository later becomes
-  public, its old runs, their summaries and their artifacts become visible
-  with it.
+  public, we expect its old runs, their summaries and their artifacts to
+  become visible with it: that is how GitHub documents repository visibility,
+  and we have not measured it ourselves yet.
 - **No retention period is promised.** Keep your own copy of
   `seetrex-record.json`.
 
