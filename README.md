@@ -108,9 +108,9 @@ Sent to `api.seetrex.com`:
   numeric owner id, and also the login and the numeric id of the account that
   triggered the run (`actor`, `actor_id`), the workflow, the ref, the commit
   sha, the run id and the event name. The server checks the name and the
-  ids, then keeps only the numeric ids: the repository id identifies your
-  record, and the name is echoed back to you in `seetrex-record.json` but is
-  not stored on Seetrex servers; the actor's login and id are not read.
+  ids, then stores the numeric ids, the branch it tracks (`ref`) and each
+  push's commit sha (`source_commit` in `seetrex-record.json`); the name is
+  echoed back there but not stored; the actor's login and id are not read.
 
 Not sent: your source code, the identity of the author or committer (beyond
 the token's `actor` claims above), commit messages, your `github.token`, or
