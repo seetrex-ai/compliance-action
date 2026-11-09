@@ -15,7 +15,16 @@
 # 8f4e1ac5), same names, same order, applied as there to the whole text
 # (not line by line, so `\s*` may cross a line break as in Python). The text
 # is decoded first, so `\s`, `\b` and the classes follow Unicode semantics as
-# Python's str patterns do.
+# Python's str patterns do. Two differences of Perl are closed by hand:
+#   - Python's `\s` also matches U+001C..U+001F (str.isspace), Perl's does
+#     not: every `\s` of filters.py is `$S` here (`[\s\x1c-\x1f]`), and a
+#     negated `[^\s...]` lists \x1c-\x1f too.
+#   - Python's `(?i)` covers the whole pattern, the pieces included, so
+#     `[A-Za-z]` of _START and _TOKEN_VALUE also matches U+017F and U+212A
+#     under it; a Perl qr// keeps its own flags when interpolated. $START and
+#     $TOKEN_VALUE are therefore plain strings: they take the flags of the
+#     pattern they are put in, case-insensitive in a `(?i)` pattern and not
+#     in the others, exactly as in Python.
 use strict;
 use warnings;
 
@@ -48,11 +57,12 @@ if ($bytes !~ $utf8) {
 my $text = $bytes;
 utf8::decode($text);
 
-my $START = qr/(?<![A-Za-z0-9])/;
+my $S = '[\s\x1c-\x1f]';
+my $START = '(?<![A-Za-z0-9])';
 my $PLACEHOLDER = qr/(?-i:\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Z_][A-Z0-9_]*|<[^<>\n]*>)/;
-my $VALUE_END = qr/(?=[\s"',;)]|$)/;
+my $VALUE_END = qr/(?=[\s\x1c-\x1f"',;)]|$)/;
 my $NOT_PLACEHOLDER = qr/(?!${PLACEHOLDER}${VALUE_END})/;
-my $TOKEN_VALUE = qr{(?=[A-Za-z0-9_\-./+=~]*[0-9])(?=[A-Za-z0-9_\-./+=~]*[A-Za-z])[A-Za-z0-9_\-./+=~]{16,}};
+my $TOKEN_VALUE = '(?=[A-Za-z0-9_\-./+=~]*[0-9])(?=[A-Za-z0-9_\-./+=~]*[A-Za-z])[A-Za-z0-9_\-./+=~]{16,}';
 
 my @patterns = (
     [private_key_block => qr/-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY(?: BLOCK)?-----/],
@@ -63,17 +73,17 @@ my @patterns = (
     [slack_token => qr/${START}xox[baprs]-[A-Za-z0-9\-]{10,}\b/],
     [slack_webhook => qr{(?i)hooks\.slack\.com/(?:services|workflows|triggers)/[A-Za-z0-9_\-]+/[A-Za-z0-9_\-/]{8,}}],
     [sendgrid_key => qr/${START}SG\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}/],
-    [bearer_token => qr/(?i)${START}Bearer\s+['"]?${TOKEN_VALUE}/],
-    [token_or_secret_assignment => qr/(?i)${START}(?:token|secret)['"]?\s*[:=]\s*['"]?${TOKEN_VALUE}/],
+    [bearer_token => qr/(?i)${START}Bearer${S}+['"]?${TOKEN_VALUE}/],
+    [token_or_secret_assignment => qr/(?i)${START}(?:token|secret)['"]?${S}*[:=]${S}*['"]?${TOKEN_VALUE}/],
     [google_api_key => qr/${START}AIza[0-9A-Za-z_\-]{35}\b/],
     [llm_provider_key => qr/${START}sk-[A-Za-z0-9_\-]{20,}\b/],
     [stripe_key => qr/${START}(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b/],
     [npm_token => qr/${START}npm_[A-Za-z0-9]{36}\b/],
     [huggingface_token => qr/${START}hf_[A-Za-z0-9]{30,}\b/],
     [jwt => qr/${START}eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\b/],
-    [azure_account_key => qr{(?i)${START}AccountKey\s*=\s*[A-Za-z0-9+/]{20,}={0,2}}],
-    [url_with_credentials => qr{(?i)${START}[a-z][a-z0-9+.\-]*://[^\s/:@'"<>]+:[^\s/@'"<>]+@[^\s/@'"<>]}],
-    [assignment_of_secret => qr/(?i)${START}(?:api[_-]?key|secret(?:[_-]?access)?[_-]?key|client[_-]?secret|password|passwd|pwd|auth[_-]?token|access[_-]?token|private[_-]?key)['"]?\s*[:=]\s*(?:"${NOT_PLACEHOLDER}[^"\n]{8,}"|'${NOT_PLACEHOLDER}[^'\n]{8,}'|${NOT_PLACEHOLDER}[^\s"'<>]{8,})/],
+    [azure_account_key => qr{(?i)${START}AccountKey${S}*=${S}*[A-Za-z0-9+/]{20,}={0,2}}],
+    [url_with_credentials => qr{(?i)${START}[a-z][a-z0-9+.\-]*://[^\s\x1c-\x1f/:@'"<>]+:[^\s\x1c-\x1f/@'"<>]+@[^\s\x1c-\x1f/@'"<>]}],
+    [assignment_of_secret => qr/(?i)${START}(?:api[_-]?key|secret(?:[_-]?access)?[_-]?key|client[_-]?secret|password|passwd|pwd|auth[_-]?token|access[_-]?token|private[_-]?key)['"]?${S}*[:=]${S}*(?:"${NOT_PLACEHOLDER}[^"\n]{8,}"|'${NOT_PLACEHOLDER}[^'\n]{8,}'|${NOT_PLACEHOLDER}[^\s\x1c-\x1f"'<>]{8,})/],
 );
 
 for my $p (@patterns) {
