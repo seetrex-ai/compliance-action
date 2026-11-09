@@ -7,7 +7,7 @@
 
 FIXTURES_PROPOSE="$TESTS_DIR/fixtures/propose"
 SEETREX_PROPOSE_URL='https://api.seetrex.com/v1/action/propose'
-MODEL_DOCUMENT_LIST='README.md SECURITY.md .github/SECURITY.md docs/SECURITY.md CONTRIBUTING.md .github/CONTRIBUTING.md docs/CONTRIBUTING.md SUPPORT.md .github/SUPPORT.md docs/SUPPORT.md CHANGELOG.md THREAT_MODEL.md docs/THREAT_MODEL.md docs/threat-model.md docs/DEPENDENCIES.md'
+CONTRACT_FIXTURES="$TESTS_DIR/fixtures/contract"
 
 # _commit_tree <dir>: copies a fixture tree into the workspace, commits it in
 # one commit and points GITHUB_SHA and the event at it.
@@ -260,18 +260,31 @@ test_intent_job_log_lists_every_document_before_sending() {
   assert_line_eq "$RUN_STDOUT" "The OIDC token could not be obtained from the runner: nothing was sent." "push: token line"
   assert_file_not_contains "$RUN_STDOUT" "Documents for the reader" "no proposal step without a recorded push"
 
-  # The reader is unreachable: push recorded, list in the log, the request
-  # attempted once and failed.
+  # The reader is unreachable: push recorded, the request attempted once and
+  # failed. ORDER, measured in the log: every document line comes before the
+  # request line (printed just before the token for the proposal is asked
+  # for), which comes before the warning that only the failed POST prints;
+  # the POST itself was made, and carried exactly the listed documents.
+  local n_doc n_req n_warn
   _live_case
   set_api_transport_error 7
   run_action propose=true propose-with-model=true
   assert_rc 0
   _assert_record_kept "reader unreachable"
+  tr -d '\r' < "$RUN_STDOUT" > "$CASE_DIR/stdout.lf"
+  n_req="$(grep -n -x -F -e "Requesting proposals from Seetrex for 5 categories, with 10 facts and 4 documents." "$CASE_DIR/stdout.lf" | cut -d: -f1)"
+  n_warn="$(grep -n -x -F -e "::warning::Seetrex could not be reached for the proposal: no proposal; the record of this push is not affected." "$CASE_DIR/stdout.lf" | cut -d: -f1)"
+  assert_ne "" "$n_req" "unreachable: the request line"
+  assert_ne "" "$n_warn" "unreachable: the warning of the failed POST"
   for d in README.md SECURITY.md CONTRIBUTING.md docs/threat-model.md; do
-    assert_line_eq "$RUN_STDOUT" "- $d: $(_file_bytes "$t/$d") bytes, sha256 $(_sha "$t/$d")" "unreachable: listed $d"
+    n_doc="$(grep -n -x -F -e "- $d: $(_file_bytes "$t/$d") bytes, sha256 $(_sha "$t/$d")" "$CASE_DIR/stdout.lf" | cut -d: -f1)"
+    assert_ne "" "$n_doc" "unreachable: listed $d"
+    if [ "$n_doc" -ge "$n_req" ]; then fail "$d is listed (line $n_doc) after the request line (line $n_req)"; fi
   done
-  assert_line_eq "$RUN_STDOUT" "::warning::Seetrex could not be reached for the proposal: no proposal; the record of this push is not affected." \
-    "unreachable: warning"
+  if [ "$n_req" -ge "$n_warn" ]; then fail "the request line (line $n_req) comes after the POST's warning (line $n_warn)"; fi
+  assert_eq 1 "$(_propose_call_count)" "unreachable: the POST was made once"
+  assert_json "$(_first_propose_body)" '[.start.documents[].path] | sort == ["CONTRIBUTING.md", "README.md", "SECURITY.md", "docs/threat-model.md"]' \
+    "unreachable: the POST carried exactly the listed documents"
 }
 
 test_intent_detectors_never_send_text() {
@@ -289,7 +302,7 @@ test_intent_detectors_never_send_text() {
   assert_rc 0
   body="$(_first_propose_body)"
   assert_json "$body" 'keys == ["start", "version"] and .version == 1' "top-level keys"
-  assert_json "$body" '.start | keys == ["categories", "facts"]' "start: categories and facts only, no documents"
+  assert_json "$body" '.start | keys == ["categories", "facts", "scan"]' "start: categories, facts and the scan counts only, no documents"
   assert_json "$body" '.start.categories | sort == ["cvd_disclosure_report", "secure_config_report", "secure_design_report", "security_updates_policy", "third_party_components_report"]' \
     "the not_documented categories of the push answer"
   assert_json "$body" '[.start.facts[] | keys] | all(. == ["id", "line_end", "line_sha256", "line_start", "path"])' \
@@ -339,17 +352,34 @@ test_intent_model_list_is_fixed_names_only() {
   done
   assert_file_not_contains "$body" 'fn main' "no code in the request"
   assert_file_not_contains "$body" 'package-ecosystem' "no dependabot.yml in the request"
-  # The list in propose.sh is the contract's, verbatim.
-  list_line="$(grep -E "^readonly MODEL_DOCUMENTS=" "$ACTION_ROOT/bin/propose.sh" | tr -d '\r')"
-  assert_eq "readonly MODEL_DOCUMENTS='$MODEL_DOCUMENT_LIST'" "$list_line" "propose.sh carries the contract's list"
   assert_file_not_contains "$ACTION_ROOT/bin/propose.sh" 'find "$TREE"' "no search of the tree for documents"
+  # The list propose.sh reads is the contract's (the copy of the schema in
+  # tests/fixtures/contract), in its order; propose.sh has no list of its own.
+  assert_eq "$(jq -c '."$defs".model_document_path.enum' "$CONTRACT_FIXTURES/propose-request.schema.json" | tr -d '\r')" \
+    "$(jq -c '.model_documents' "$ACTION_ROOT/bin/contract/reader-contract-1.json" | tr -d '\r')" "the runtime list is the contract's"
+  assert_file_not_contains "$ACTION_ROOT/bin/propose.sh" 'CHANGELOG.md' "no list of names of its own in propose.sh"
+  # Files of the contract's list are sent (PRIVACY.md, .github/THREAT_MODEL.md);
+  # CHANGELOG.md, off the list, is not.
+  _live_case
+  printf 'docs: privacy\n' > "$CASE_DIR/p"
+  commit_file "$CASE_DIR/p" PRIVACY.md
+  commit_file "$CASE_DIR/p" .github/THREAT_MODEL.md
+  commit_file "$CASE_DIR/p" CHANGELOG.md
+  make_event private
+  _queue_done
+  run_action propose=true propose-with-model=true
+  assert_rc 0
+  body="$(_first_propose_body)"
+  assert_json "$body" '[.start.documents[].path] | sort == [".github/THREAT_MODEL.md", "CONTRIBUTING.md", "PRIVACY.md", "README.md", "SECURITY.md", "docs/threat-model.md"]' \
+    "PRIVACY.md and .github/THREAT_MODEL.md are sent, CHANGELOG.md is not"
+  assert_file_not_contains "$RUN_STDOUT" "- CHANGELOG.md" "CHANGELOG.md is not even listed"
 }
 
 test_intent_runner_drops_citation_whose_hash_mismatches() {
   # INTENT: every citation of the answer is rehydrated from the local file of
   # the commit and its quote_sha256 compared; a citation that does not match
-  # is dropped and its field set to false in the proposed envelope, the
-  # review says "not found" for it, and a category left with no cited true is
+  # is dropped and its field is false in the proposed envelope, the review
+  # says "not found" for it, and a category left with no cited true is
   # delivered as nothing found. A matching citation is kept with its quote
   # rehydrated locally in the review.
   # CONTEXT: plan R4 section 2.1 (third check of the citation) and section 1
@@ -359,7 +389,7 @@ test_intent_runner_drops_citation_whose_hash_mismatches() {
   _live_case
   art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
   _queue_done
-  run_action propose=true
+  run_action propose=true propose-with-model=true
   assert_rc 0
   assert_file_exists "$art/third_party_components_report.json" "tpc: ready envelope"
   assert_json "$art/third_party_components_report.json" '.payload.due_diligence.process_documented == true' \
@@ -376,18 +406,20 @@ test_intent_runner_drops_citation_whose_hash_mismatches() {
   assert_file_contains "$art/third_party_components_report.review.md" '- `due_diligence.applies_to_open_source` = false: not found' \
     "tpc review: the dropped citation is not found"
   assert_file_not_contains "$art/third_party_components_report.review.md" 'package-ecosystem' "tpc review: no quote for a dropped citation"
-  # Two matching citations, one spanning two lines.
-  assert_json "$art/cvd_disclosure_report.json" '.payload.cvd_policy.in_place == true and .payload.vulnerability_information_sharing.reporting_contact_address_provided == true' \
-    "cvd: both citations kept"
+  # Three matching citations, one spanning two lines.
+  assert_json "$art/cvd_disclosure_report.json" '.payload.cvd_policy.in_place == true and .payload.vulnerability_information_sharing.reporting_contact_address_provided == true and .payload.vulnerability_information_sharing.measures_in_place == true' \
+    "cvd: the three citations kept"
   assert_file_contains "$art/cvd_disclosure_report.review.md" '    We acknowledge reports within 5 working days.' "cvd review: second line of the quote"
-  # Summary: only paths and lines.
-  assert_file_contains "$GITHUB_STEP_SUMMARY" '| `cra-art13-third-party-components` | `third_party_components_report` | proposal ready (1 fact cited: CONTRIBUTING.md:3-3) |' \
-    "summary: tpc with one fact"
-  assert_file_contains "$GITHUB_STEP_SUMMARY" '| `cra-annex1p2-cvd-disclosure` | `cvd_disclosure_report` | proposal ready (2 facts cited: SECURITY.md:3-3, SECURITY.md:5-6) |' \
-    "summary: cvd with two facts"
+  # Summary: only paths and lines; citations, never "facts".
+  assert_file_contains "$GITHUB_STEP_SUMMARY" '| `cra-art13-third-party-components` | `third_party_components_report` | proposal ready (1 citation: CONTRIBUTING.md:3-3) |' \
+    "summary: tpc with one citation"
+  assert_file_contains "$GITHUB_STEP_SUMMARY" '| `cra-annex1p2-cvd-disclosure` | `cvd_disclosure_report` | proposal ready (3 citations: SECURITY.md:3-3, SECURITY.md:5-5, SECURITY.md:5-6) |' \
+    "summary: cvd with three citations"
   assert_file_contains "$GITHUB_STEP_SUMMARY" '| `cra-annex1-secure-design` | `secure_design_report` | nothing found |' "summary: nothing found"
+  assert_file_not_contains "$GITHUB_STEP_SUMMARY" 'fact cited' "summary: no citation is called a fact"
+  assert_file_not_contains "$GITHUB_STEP_SUMMARY" 'facts cited' "summary: no citations are called facts"
   assert_file_not_contains "$GITHUB_STEP_SUMMARY" 'Dependencies are reviewed' "summary: no quote"
-  assert_line_eq "$RUN_STDOUT" "Seetrex proposed attestations for review: 4 citations kept, 1 dropped (their lines do not match this commit), 7 files in the seetrex-proposals artifact." \
+  assert_line_eq "$RUN_STDOUT" "Seetrex proposed attestations for review: 5 citations kept, 1 dropped (not verified against this commit), 7 files in the seetrex-proposals artifact." \
     "the closing line counts kept and dropped"
   assert_file_contains "$GITHUB_OUTPUT" "proposals=$art" "the artifact output"
   # The unrequested category of the answer is ignored.
@@ -398,14 +430,14 @@ test_intent_runner_drops_citation_whose_hash_mismatches() {
   _live_case
   art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
   _queue_done bad
-  run_action propose=true
+  run_action propose=true propose-with-model=true
   assert_rc 0
   assert_no_file "$art/third_party_components_report.json" "all bad: no tpc envelope"
   assert_no_file "$art/cvd_disclosure_report.json" "all bad: no cvd envelope"
   assert_no_file "$art/secure_config_report.json.pending" "all bad: no pending envelope"
   assert_file_contains "$GITHUB_STEP_SUMMARY" '| `cra-art13-third-party-components` | `third_party_components_report` | nothing found |' \
     "all bad: tpc nothing found"
-  assert_line_eq "$RUN_STDOUT" "Seetrex proposed attestations for review: 0 citations kept, 5 dropped (their lines do not match this commit), 1 files in the seetrex-proposals artifact." \
+  assert_line_eq "$RUN_STDOUT" "Seetrex proposed attestations for review: 0 citations kept, 6 dropped (not verified against this commit), 1 files in the seetrex-proposals artifact." \
     "all bad: counts"
   _assert_record_kept "all bad"
 
@@ -413,10 +445,12 @@ test_intent_runner_drops_citation_whose_hash_mismatches() {
   _live_case
   art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
   _done_response "$CASE_DIR/done.json"
-  jq '.proposals.cvd_disclosure_report.citations[0].line_start = 400 | .proposals.cvd_disclosure_report.citations[0].line_end = 400
-      | .proposals.cvd_disclosure_report.citations[1].path = "docs/MISSING.md"' "$CASE_DIR/done.json" > "$CASE_DIR/done2.json"
+  jq '.proposals.cvd_disclosure_report.citations[2].line_start = 400 | .proposals.cvd_disclosure_report.citations[2].line_end = 400
+      | .proposals.cvd_disclosure_report.citations[0].path = "docs/MISSING.md"
+      | .proposals.cvd_disclosure_report.citations[1].line_start = 400 | .proposals.cvd_disclosure_report.citations[1].line_end = 400' \
+    "$CASE_DIR/done.json" > "$CASE_DIR/done2.json"
   set_api_response 200 "$CASE_DIR/done2.json"
-  run_action propose=true
+  run_action propose=true propose-with-model=true
   assert_rc 0
   assert_no_file "$art/cvd_disclosure_report.json" "out of range and missing file: cvd nothing found"
   assert_eq 1 "$(_propose_call_count)" "a 200 done at once is not polled"
@@ -436,7 +470,7 @@ test_intent_pending_proposal_is_not_a_json_attestation() {
   _live_case
   art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
   _queue_done
-  run_action propose=true
+  run_action propose=true propose-with-model=true
   assert_rc 0
   assert_file_exists "$art/secure_config_report.json.pending" "needs_person: .json.pending"
   assert_no_file "$art/secure_config_report.json" "needs_person: no .json"
@@ -444,18 +478,19 @@ test_intent_pending_proposal_is_not_a_json_attestation() {
     '.schema == "seetrex.attestation.v2" and .attested_via == "reader+person" and .payload.secure_configuration.secure_by_default == true and .payload.secure_configuration.tailor_made_agreement == false' \
     "the pending envelope"
   review="$art/secure_config_report.review.md"
-  assert_file_contains "$review" '- `security_updates_capability.auto_updates.applicable`: decide yourself' "review: a pending field"
+  assert_file_contains "$review" '- `security_updates_capability.auto_updates.applicable`: decide yourself (proposed as true, the value that exempts nothing)' \
+    "review: a pending field with its fixed value"
   assert_file_contains "$review" '- `secure_configuration.secure_by_default` = true: `README.md:3-3`' "review: the cited true"
   assert_file_contains "$review" '    Secure by default: every option ships closed.' "review: the quote"
   assert_file_contains "$review" '- `security_updates_capability.updates_mechanism` = false: not found' "review: a false"
   assert_file_not_contains "$review" '- `secure_configuration.tailor_made_agreement` = false: not found' "review: a pending field is not 'not found'"
-  assert_file_contains "$GITHUB_STEP_SUMMARY" '| `cra-annex1-secure-config-updates` | `secure_config_report` | needs a person (8 fields to decide; 1 fact cited: README.md:3-3) |' \
+  assert_file_contains "$GITHUB_STEP_SUMMARY" '| `cra-annex1-secure-config-updates` | `secure_config_report` | needs a person (8 fields to decide; 1 citation: README.md:3-3) |' \
     "summary: needs a person"
   # security_updates_policy: never an envelope, a review of its fields.
   assert_no_file "$art/security_updates_policy.json" "sup: no envelope"
   assert_no_file "$art/security_updates_policy.json.pending" "sup: no pending envelope"
   assert_file_contains "$art/security_updates_policy.review.md" '- `policy.support_period_end_at`: decide yourself' "sup review"
-  assert_file_contains "$GITHUB_STEP_SUMMARY" '| `cra-art13-security-updates` | `security_updates_policy` | needs a person (9 fields to decide; no fact cited) |' \
+  assert_file_contains "$GITHUB_STEP_SUMMARY" '| `cra-art13-security-updates` | `security_updates_policy` | needs a person (9 fields to decide; no citation) |' \
     "summary: sup"
 
   # Committed as it is, the .pending file is not an attestation (a copy: the
@@ -480,8 +515,8 @@ test_intent_pending_proposal_is_not_a_json_attestation() {
 test_intent_credential_pattern_file_is_not_sent() {
   # INTENT: a document of the fixed list whose text matches a credential
   # pattern (a private key block, a password assignment) is left out of the
-  # request, the log says so by path only, and no byte of it reaches the
-  # body; the other documents still go.
+  # request, the log says so by path and pattern name only, and no byte of it
+  # reaches the body; the other documents still go.
   # CONTEXT: plan R4 section 2.1 step 3 (credential filter in the runner, the
   # reader filters again).
   # EXPIRES IF: the filter moves to the server only.
@@ -498,8 +533,8 @@ test_intent_credential_pattern_file_is_not_sent() {
   assert_file_not_contains "$body" 'PRIVATE KEY' "no key block in the request"
   assert_file_not_contains "$body" 'MIIEfixture' "no key bytes in the request"
   assert_file_not_contains "$body" 'hunter2' "no password in the request"
-  assert_line_eq "$RUN_STDOUT" "- SECURITY.md: left out (a line looks like a credential)" "the log names the file left out"
-  assert_line_eq "$RUN_STDOUT" "- README.md: left out (a line looks like a credential)" "the log names the second file left out"
+  assert_line_eq "$RUN_STDOUT" "- SECURITY.md: left out (a line looks like a credential: private_key_block)" "the log names the file left out"
+  assert_line_eq "$RUN_STDOUT" "- README.md: left out (a line looks like a credential: assignment_of_secret)" "the log names the second file left out"
   assert_file_not_contains "$RUN_STDOUT" 'hunter2' "no password in the log"
   assert_file_not_contains "$RUN_STDOUT" 'PRIVATE KEY' "no key marker in the log"
   assert_file_not_contains "$GITHUB_STEP_SUMMARY" 'hunter2' "no password in the summary"
@@ -509,7 +544,7 @@ test_intent_credential_pattern_file_is_not_sent() {
   # An empty document and one over the cap are left out too.
   _live_case
   : > "$CASE_DIR/empty"
-  commit_file "$CASE_DIR/empty" CHANGELOG.md
+  commit_file "$CASE_DIR/empty" PRIVACY.md
   head -c 70000 /dev/zero | tr '\0' 'x' > "$CASE_DIR/big"
   commit_file "$CASE_DIR/big" SUPPORT.md
   make_event private
@@ -519,7 +554,7 @@ test_intent_credential_pattern_file_is_not_sent() {
   body="$(_first_propose_body)"
   assert_json "$body" '[.start.documents[].path] | sort == ["CONTRIBUTING.md", "README.md", "SECURITY.md", "docs/threat-model.md"]' \
     "empty and oversize documents are not sent"
-  assert_line_eq "$RUN_STDOUT" "- CHANGELOG.md: left out (empty)" "empty: said"
+  assert_line_eq "$RUN_STDOUT" "- PRIVACY.md: left out (empty)" "empty: said"
   assert_line_eq "$RUN_STDOUT" "- SUPPORT.md: left out (70000 bytes, over the 64 KiB cap)" "oversize: said"
 }
 
@@ -573,10 +608,13 @@ test_intent_propose_failure_never_fails_the_record() {
   run_action propose=true
   assert_rc 0
   _assert_record_kept "ticket"
-  assert_eq 21 "$(_propose_call_count)" "the start and twenty polls"
-  assert_eq 22 "$(token_call_count)" "a fresh token for the push and for each of the 21 proposal requests"
-  assert_eq 20 "$(sleep_count)" "twenty waits"
+  # The 10-minute budget of waits binds before the 40 polls: 5 + 10 + 20 +
+  # 18 x 30 = 575 s, and one more wait would pass 600 s.
+  assert_eq 22 "$(_propose_call_count)" "the start and twenty-one polls"
+  assert_eq 23 "$(token_call_count)" "a fresh token for the push and for each of the 22 proposal requests"
+  assert_eq 21 "$(sleep_count)" "twenty-one waits"
   assert_eq $'5\n10\n20\n30\n30' "$(sleep_log | head -n 5)" "backoff 5, 10, 20, 30, 30..."
+  assert_eq 575 "$(sleep_log | awk '{ s += $1 } END { print s }')" "575 s of waits in all, under the 600 s cap"
   assert_line_eq "$RUN_STDOUT" "::warning::Seetrex's reader did not finish in time: no proposal; the record of this push is not affected." "gave up"
   for i in $(_propose_calls | tail -n +2); do
     assert_eq '{"version":1,"ticket":"Qm9vdHN0cmFwVGlja2V0MDAwMDAwMDAwMDAwMDAwMA"}' "$(curl_call "$i" body)" "poll $i carries the ticket only"
@@ -596,4 +634,377 @@ test_intent_propose_failure_never_fails_the_record() {
   assert_eq 4 "$(token_call_count)" "four tokens"
   assert_json "$(curl_call_dir 3)/body" 'keys == ["sbom", "trivy"]' "the push body is a push"
   assert_json "$(_first_propose_body)" '.start.categories | length == 5' "the start request"
+}
+
+# ------------------------------------------------ reader contract 1 (R4-4 r2)
+
+# _validate <schema name> <$defs entry or ""> <doc>: the errors of <doc>
+# against the copy of the contract in tests/fixtures/contract ("[]" = valid).
+_validate() {
+  jq -c -n --slurpfile schema "$CONTRACT_FIXTURES/$1.schema.json" --slurpfile doc "$3" --arg def "$2" \
+    -f "$CONTRACT_FIXTURES/validate.jq" | tr -d '\r'
+}
+
+# _sent_trivy_sha <push body>: SHA-256 of the `trivy` string of a push body,
+# decoded byte for byte (base64, so no newline is added on the way).
+_sent_trivy_sha() {
+  local line
+  line="$(jq -r '.trivy | @base64' "$1" | tr -d '\r\n' | base64 -d | sha256sum)"
+  printf '%s\n' "${line%% *}"
+}
+
+# _push_with_mlr <out>: the push answer with monitoring-lifecycle not_documented.
+_push_with_mlr() {
+  jq '(.results.obligations[] | select(.ruleset_id == "cra-annex1-monitoring-lifecycle"))
+      |= {ruleset_id, status: "not_documented"}' "$FIXTURES_PROPOSE/push-200.json" > "$1"
+}
+
+# _mlr_response <out> <finding_count> <scanned_packages> <report_sha256>: a
+# done answer whose only proposal is monitoring_lifecycle_report with one
+# scan citation carrying those values.
+_mlr_response() {
+  jq -n --argjson f "$2" --argjson p "$3" --arg sha "$4" '{version: 1, status: "done", proposals: {
+    monitoring_lifecycle_report: {state: "needs_person",
+      citations: [{field: "market_availability.no_known_exploitable_vulnerabilities", value: true,
+                   source: "vuln_scan", finding_count: $f, scanned_packages: $p, report_sha256: $sha}],
+      pending_fields: ["data_lifecycle.transfer_applicable", "data_lifecycle.secure_transfer"]}}}' > "$1"
+}
+
+test_intent_propose_request_follows_the_contract() {
+  # INTENT: the proposal request is valid against propose-request.schema.json
+  # of the contract in force (copied in tests/fixtures/contract, read by a
+  # validator of its own keywords): start only carries the keys of the
+  # schema, every document path is in its enum, and start.scan carries the
+  # scan of the push: finding_count of the reduced report, scanned_packages
+  # (library components of the SBOM of the same push) and report_sha256 equal
+  # to the SHA-256 of exactly the `trivy` string the push sent. A poll is
+  # valid too. The dry run shows the same scan.
+  # CONTEXT: R4-4 review round 1 (the branch was written on an older
+  # contract; a pretty-printed report made report_sha256 never match).
+  # EXPIRES IF: the contract changes version.
+  local body push sha start_keys
+  _live_case
+  _queue_done
+  run_action propose=true propose-with-model=true
+  assert_rc 0
+  body="$(_first_propose_body)"
+  assert_eq '[]' "$(_validate propose-request '' "$body")" "the start request is valid against the contract"
+  start_keys="$(jq -c '."$defs".start.properties | keys' "$CONTRACT_FIXTURES/propose-request.schema.json" | tr -d '\r')"
+  assert_json "$body" "(.start | keys) - $start_keys == []" "start has only keys of the schema"
+  assert_json "$body" "[.start.documents[].path] - $(jq -c '."$defs".model_document_path.enum' "$CONTRACT_FIXTURES/propose-request.schema.json" | tr -d '\r') == []" \
+    "every document path is in the contract's enum"
+  assert_json "$body" '.start.scan | keys == ["finding_count", "report_sha256", "scanned_packages"]' "the scan carrier"
+  push="$(curl_call_dir 3)/body"
+  assert_json "$push" 'keys == ["sbom", "trivy"]' "call 3 is the push"
+  sha="$(_sent_trivy_sha "$push")"
+  assert_json "$body" ".start.scan.report_sha256 == \"$sha\"" "report_sha256 is the hash of the trivy string the push sent"
+  assert_json "$body" ".start.scan.finding_count == $(jq '.trivy | fromjson | [.Results[]?.Vulnerabilities[]?] | length' "$push" | tr -d '\r')" \
+    "finding_count is the number of entries of the report sent"
+  assert_json "$body" '.start.scan.finding_count == 2 and .start.scan.scanned_packages == 1' "the fixture: 2 findings over 1 library"
+  # A poll is valid against the contract too.
+  printf '%s' "$(curl_call "$(_propose_calls | sed -n 2p)" body)" > "$CASE_DIR/poll.json"
+  assert_eq '[]' "$(_validate propose-request '' "$CASE_DIR/poll.json")" "the poll is valid against the contract"
+
+  # The dry run lists the same scan.
+  reset_logs
+  run_action dry-run=true propose=true
+  assert_rc 0
+  assert_line_eq "$RUN_STDOUT" "Scan of the push: 2 findings over 1 packages, report sha256 $sha" "the dry run shows the scan"
+}
+
+test_intent_scan_citation_kept_only_when_it_matches_the_sent_scan() {
+  # INTENT: the scanner-backed true of monitoring_lifecycle_report is kept
+  # only when its finding_count, scanned_packages and report_sha256 are the
+  # values this run sent, with zero findings over at least one package;
+  # otherwise it is dropped and the category is nothing found.
+  # CONTEXT: plan R4 section 1 (the one D field of the scanner) and R4-4
+  # review round 1 (the citation was dropped always).
+  # EXPIRES IF: the scanner field leaves the contract.
+  local art sha
+  setup_case
+  _commit_tree "$FIXTURES_PROPOSE/tree"
+  set_trivy_fixture json "$FIXTURES_PROPOSE/trivy-clean.json"
+  _push_with_mlr "$CASE_DIR/push.json"
+  art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
+  run_action dry-run=true propose=true
+  assert_rc 0
+  sha="$(sed -n 's/^Scan of the push: 0 findings over 1 packages, report sha256 \([0-9a-f]\{64\}\)\r\{0,1\}$/\1/p' "$RUN_STDOUT")"
+  assert_ne "" "$sha" "the clean scan: 0 findings over 1 package"
+  # Kept.
+  reset_logs
+  set_api_response 200 "$CASE_DIR/push.json"
+  _mlr_response "$CASE_DIR/done.json" 0 1 "$sha"
+  set_api_response 200 "$CASE_DIR/done.json"
+  run_action propose=true
+  assert_rc 0
+  assert_eq "$sha" "$(_sent_trivy_sha "$(curl_call_dir 3)/body")" "the dry run's hash is the push's"
+  assert_json "$art/monitoring_lifecycle_report.json.pending" \
+    '.payload.market_availability.no_known_exploitable_vulnerabilities == true and .payload.data_lifecycle.transfer_applicable == true and .payload.data_lifecycle.secure_transfer == false' \
+    "kept: the scanner true, pending fields at their fixed values"
+  assert_file_contains "$art/monitoring_lifecycle_report.review.md" \
+    "- \`market_availability.no_known_exploitable_vulnerabilities\` = true: the vulnerability scan of this push has 0 findings over 1 packages (report sha256 $sha)." \
+    "kept: the review says what the scan was"
+  # Dropped: another hash, another package count, a scan with findings.
+  local variant
+  for variant in sha packages; do
+    reset_logs
+    set_api_response 200 "$CASE_DIR/push.json"
+    if [ "$variant" = sha ]; then
+      _mlr_response "$CASE_DIR/done.json" 0 1 "$(printf '%s' "$sha" | tr '0-9a-f' '1-9a-f0')"
+    else
+      _mlr_response "$CASE_DIR/done.json" 0 2 "$sha"
+    fi
+    set_api_response 200 "$CASE_DIR/done.json"
+    run_action propose=true
+    assert_rc 0
+    assert_no_file "$art/monitoring_lifecycle_report.json.pending" "another $variant: dropped"
+    assert_line_eq "$RUN_STDOUT" "Seetrex proposed attestations for review: 0 citations kept, 1 dropped (not verified against this commit), 0 files in the seetrex-proposals artifact." \
+      "another $variant: counted as dropped"
+  done
+  setup_case
+  _commit_tree "$FIXTURES_PROPOSE/tree"
+  _push_with_mlr "$CASE_DIR/push.json"
+  set_api_response 200 "$CASE_DIR/push.json"
+  _mlr_response "$CASE_DIR/done.json" 0 1 "$sha"
+  set_api_response 200 "$CASE_DIR/done.json"
+  run_action propose=true
+  assert_rc 0
+  assert_json "$(_first_propose_body)" '.start.scan.finding_count == 2' "the default fixture has findings"
+  assert_no_file "$RUNNER_TEMP/seetrex-out/seetrex-proposals/monitoring_lifecycle_report.json.pending" "a scan with findings: dropped"
+}
+
+test_intent_proposal_is_rebuilt_from_kept_citations() {
+  # INTENT: the envelope delivered is rebuilt from the contract, never copied
+  # from the answer: exactly the leaves of the category's template, a free
+  # leaf true only when ONE kept citation names it (an uncited true of the
+  # answer is false), a pending leaf at the contract's fixed value, a key the
+  # answer added absent; the .json and the review say the same thing leaf by
+  # leaf; two citations for one field reject the category whole, with a
+  # warning. Each delivered envelope is valid against envelope_<category> of
+  # the contract.
+  # CONTEXT: R4-4 review round 1 (an uncited true survived in the .json
+  # while the review said "not found"; payload keys reached the review).
+  # EXPIRES IF: the answer stops carrying envelopes (then nothing is copied).
+  local art f cat leaf v review
+  _live_case
+  art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
+  _queue_done
+  run_action propose=true propose-with-model=true
+  assert_rc 0
+  assert_json "$art/third_party_components_report.json" '.payload.component_vulnerabilities.fix_sharing_commitment == false' \
+    "an uncited true of the answer is false"
+  assert_file_contains "$art/third_party_components_report.review.md" '- `component_vulnerabilities.fix_sharing_commitment` = false: not found' \
+    "and the review says so"
+  assert_file_not_contains "$art/third_party_components_report.json" 'injected' "a key the answer added is not in the envelope"
+  assert_file_not_contains "$art/third_party_components_report.review.md" 'injected' "nor in the review"
+  for f in "$art"/*.json "$art"/*.json.pending; do
+    cat="$(jq -r .category "$f" | tr -d '\r')"
+    assert_eq '[]' "$(_validate propose-response "envelope_$cat" "$f")" "$cat: valid against envelope_$cat"
+    assert_eq "$(jq -c '[.payload | paths(type == "boolean") | join(".")] | sort' "$CONTRACT_FIXTURES/templates/$cat.json" | tr -d '\r')" \
+      "$(jq -c '[.payload | paths(type == "boolean") | join(".")] | sort' "$f" | tr -d '\r')" "$cat: exactly the leaves of the template"
+    review="$art/$cat.review.md"
+    while IFS=$'\t' read -r leaf v; do
+      v="${v%$'\r'}"
+      if [ "$v" = true ]; then
+        if jq -e --arg l "$leaf" --arg c "$cat" '.categories[$c].leaves[$l] == null' \
+          "$ACTION_ROOT/bin/contract/reader-contract-1.json" > /dev/null; then
+          assert_file_contains "$review" "- \`$leaf\` = true: " "$cat: true in the .json, true in the review: $leaf"
+        fi
+      else
+        assert_file_not_contains "$review" "- \`$leaf\` = true: " "$cat: false in the .json, not true in the review: $leaf"
+      fi
+    done < <(jq -r '.payload | paths(type == "boolean") as $p | "\($p | join("."))\t\(getpath($p))"' "$f")
+  done
+
+  # Two citations for one field: the category is rejected whole.
+  _live_case
+  art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
+  _done_response "$CASE_DIR/done.json"
+  jq '.proposals.cvd_disclosure_report.citations += [.proposals.cvd_disclosure_report.citations[0]]' "$CASE_DIR/done.json" > "$CASE_DIR/dup.json"
+  set_api_response 200 "$CASE_DIR/dup.json"
+  run_action propose=true propose-with-model=true
+  assert_rc 0
+  assert_no_file "$art/cvd_disclosure_report.json" "duplicate field: no envelope"
+  assert_no_file "$art/cvd_disclosure_report.review.md" "duplicate field: no review"
+  assert_line_eq "$RUN_STDOUT" "::warning::Seetrex's proposal for cvd_disclosure_report cites one field twice: that category was left out." \
+    "duplicate field: the warning"
+  assert_file_contains "$GITHUB_STEP_SUMMARY" '| `cra-annex1p2-cvd-disclosure` | `cvd_disclosure_report` | rejected (one field cited twice) |' \
+    "duplicate field: the summary"
+  assert_file_exists "$art/third_party_components_report.json" "the other categories are delivered"
+}
+
+test_intent_security_updates_policy_is_never_an_envelope() {
+  # INTENT: security_updates_policy is never proposed: whatever state and
+  # envelope the answer gives it, the artifact holds only its review.md (its
+  # fields, to decide by hand), never a .json or a .json.pending.
+  # CONTEXT: plan R4 section 1 (N x9, never proposed) and R4-4 review round 1.
+  # EXPIRES IF: the contract starts proposing this category.
+  local art state
+  for state in ready needs_person nothing_found; do
+    _live_case
+    art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
+    _done_response "$CASE_DIR/done.json"
+    jq --arg s "$state" '.proposals.security_updates_policy = {state: $s,
+        envelope: {schema: "seetrex.attestation.v2", category: "security_updates_policy", attested_via: "reader+person",
+                   payload: {policy: {updates_free_of_charge: true}}},
+        citations: [{field: "policy.updates_free_of_charge", value: true, path: "SECURITY.md", line_start: 3, line_end: 3,
+                     quote_sha256: .proposals.cvd_disclosure_report.citations[0].quote_sha256}]}' \
+      "$CASE_DIR/done.json" > "$CASE_DIR/sup.json"
+    set_api_response 200 "$CASE_DIR/sup.json"
+    run_action propose=true propose-with-model=true
+    assert_rc 0
+    assert_no_file "$art/security_updates_policy.json" "$state: no .json"
+    assert_no_file "$art/security_updates_policy.json.pending" "$state: no .json.pending"
+    assert_file_contains "$art/security_updates_policy.review.md" '- `policy.updates_free_of_charge`: decide yourself' "$state: only the review"
+  done
+}
+
+test_intent_citations_only_to_sent_documents_or_facts() {
+  # INTENT: a layer-M citation is kept only when it names a document of the
+  # closed list that this run sent, a layer-D citation only when it is
+  # exactly {path, line_start, line_end} of a fact this run sent; a citation
+  # of source code, a workflow, a file off the list, a line no detector cited
+  # or a document not sent is dropped even when its hash matches.
+  # CONTEXT: R4-4 review round 1; contract 1 (model_line_citation: a
+  # document of the list; line_citation: where the detector found it).
+  # EXPIRES IF: the contract lets the model cite other files.
+  local art t="$FIXTURES_PROPOSE/tree"
+  _live_case
+  art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
+  jq -n --arg main "$(_lines_sha "$t/src/main.rs" 1 1)" --arg wf "$(_lines_sha "$t/.github/workflows/codeql.yml" 12 12)" \
+    --arg notes "$(_lines_sha "$t/docs/security-notes.md" 1 1)" --arg c4 "$(_lines_sha "$t/CONTRIBUTING.md" 4 4)" \
+    --arg c3 "$(_lines_sha "$t/CONTRIBUTING.md" 3 3)" --arg s3 "$(_lines_sha "$t/SECURITY.md" 3 3)" \
+    --arg s56 "$(_lines_sha "$t/SECURITY.md" 5 6)" '
+    def c($f; $p; $a; $b; $h): {field: $f, value: true, path: $p, line_start: $a, line_end: $b, quote_sha256: $h};
+    {version: 1, status: "done", proposals: {
+      third_party_components_report: {state: "ready", citations: [
+        c("due_diligence.process_documented"; "src/main.rs"; 1; 1; $main),
+        c("component_vulnerabilities.upstream_reporting_defined"; ".github/workflows/codeql.yml"; 12; 12; $wf),
+        c("component_vulnerabilities.remediation_per_annex1_part2"; "docs/security-notes.md"; 1; 1; $notes),
+        c("component_vulnerabilities.fix_sharing_commitment"; "CONTRIBUTING.md"; 4; 4; $c4),
+        c("due_diligence.applies_to_open_source"; "CONTRIBUTING.md"; 3; 3; $c3)]},
+      cvd_disclosure_report: {state: "ready", citations: [
+        c("cvd_policy.in_place"; "SECURITY.md"; 3; 3; $s3),
+        c("vulnerability_information_sharing.reporting_contact_address_provided"; "SECURITY.md"; 5; 6; $s56)]}}}' \
+    > "$CASE_DIR/done.json"
+  set_api_response 200 "$CASE_DIR/done.json"
+  run_action propose=true propose-with-model=true
+  assert_rc 0
+  assert_json "$art/third_party_components_report.json" \
+    '.payload == {due_diligence: {process_documented: false, applies_to_open_source: false},
+                  component_vulnerabilities: {upstream_reporting_defined: false, remediation_per_annex1_part2: false, fix_sharing_commitment: true}}' \
+    "tpc: only the citation of a sent document survives (code, workflow, off-list file, non-fact line dropped)"
+  assert_json "$art/cvd_disclosure_report.json" \
+    '.payload.cvd_policy.in_place == true and .payload.vulnerability_information_sharing.reporting_contact_address_provided == false' \
+    "cvd: the exact fact is kept, a range that is not a fact is dropped"
+  assert_line_eq "$RUN_STDOUT" "Seetrex proposed attestations for review: 2 citations kept, 5 dropped (not verified against this commit), 4 files in the seetrex-proposals artifact." \
+    "two kept, five dropped"
+
+  # Facts only (no documents sent): a layer-M citation of README.md is dropped.
+  _live_case
+  _queue_done
+  run_action propose=true
+  assert_rc 0
+  assert_no_file "$RUNNER_TEMP/seetrex-out/seetrex-proposals/secure_config_report.json.pending" \
+    "no document was sent: the README citation is dropped, nothing found"
+}
+
+test_intent_document_not_utf8_is_left_out() {
+  # INTENT: a document of the list that is not well-formed UTF-8 (invalid
+  # bytes, a surrogate) or carries a NUL byte is left out and the log says
+  # "left out (not UTF-8 text)"; what the log lists as sent is exactly what
+  # the request carries, byte for byte.
+  # CONTEXT: R4-4 review round 1 (jq replaced invalid bytes, so the text
+  # sent differed from the bytes and sha256 listed).
+  # EXPIRES IF: the contract accepts binary documents.
+  local body d t="$FIXTURES_PROPOSE/tree" listed sent
+  _live_case
+  printf 'support \377\376 bytes\n' > "$CASE_DIR/bad1"
+  commit_file "$CASE_DIR/bad1" SUPPORT.md
+  printf 'privacy\000nul\n' > "$CASE_DIR/bad2"
+  commit_file "$CASE_DIR/bad2" PRIVACY.md
+  printf 'surrogate \355\240\200 here\n' > "$CASE_DIR/bad3"
+  commit_file "$CASE_DIR/bad3" .github/SUPPORT.md
+  printf 'caf\303\251 ok\n' > "$CASE_DIR/good"
+  commit_file "$CASE_DIR/good" docs/SUPPORT.md
+  make_event private
+  _queue_done
+  run_action propose=true propose-with-model=true
+  assert_rc 0
+  for d in SUPPORT.md PRIVACY.md .github/SUPPORT.md; do
+    assert_line_eq "$RUN_STDOUT" "- $d: left out (not UTF-8 text)" "$d: said"
+  done
+  body="$(_first_propose_body)"
+  listed="$(sed -n 's/^- \([^:]*\): [0-9]* bytes, sha256 [0-9a-f]\{64\}\r\{0,1\}$/\1/p' "$RUN_STDOUT" | sort | tr '\n' ' ')"
+  sent="$(jq -r '.start.documents[].path' "$body" | tr -d '\r' | sort | tr '\n' ' ')"
+  assert_eq "CONTRIBUTING.md README.md SECURITY.md docs/SUPPORT.md docs/threat-model.md " "$listed" "listed: the clean documents"
+  assert_eq "$listed" "$sent" "listed = sent"
+  for d in CONTRIBUTING.md README.md SECURITY.md docs/SUPPORT.md docs/threat-model.md; do
+    assert_eq "$(base64 < "$WS/$d" | tr -d '\r\n')" \
+      "$(jq -r --arg p "$d" '.start.documents[] | select(.path == $p) | .text | @base64' "$body" | tr -d '\r\n')" "$d: sent byte for byte"
+  done
+}
+
+test_intent_credential_filter_ports_the_reader_patterns() {
+  # INTENT: the runner's credential filter (bin/doccheck.pl) is the reader's
+  # own (services/reader/filters.py of the Seetrex repository): every
+  # pattern, by name, on a case each, including assignments whose name
+  # starts with a word and `_` (DB_PASSWORD, AWS_SECRET_ACCESS_KEY), bare
+  # token/secret keys, and the placeholder rule (${NAME}, $NAME in capitals,
+  # <...> are not secrets; $Lowercase is). The expected verdicts were
+  # measured against filters.py with the same texts.
+  # CONTEXT: R4-4 review round 1 (the runner's list was shorter than the
+  # reader's).
+  # EXPIRES IF: filters.py changes its list (then the cases change with it).
+  local name want text got names
+  while IFS=$'\t' read -r name want text; do
+    case "$name" in '#'* | '') continue ;; esac
+    text="${text%$'\r'}"
+    printf '%s' "${text//@@/}" > "$TEST_TMP/case.txt"
+    got="$(perl "$ACTION_ROOT/bin/doccheck.pl" "$TEST_TMP/case.txt" | tr -d '\r')"
+    if [ "$want" = ok ]; then
+      assert_eq ok "$got" "case $name"
+    else
+      assert_eq "credential $want" "$got" "case $name"
+    fi
+  done < "$FIXTURES_PROPOSE/credential-cases.tsv"
+  names="$(grep -v '^#' "$FIXTURES_PROPOSE/credential-cases.tsv" | cut -f2 | tr -d '\r' | grep -v -x ok | sort -u | wc -l)"
+  assert_eq 19 "${names//[[:space:]]/}" "every one of the 19 patterns of filters.py has a case"
+}
+
+test_intent_line_hash_handles_crlf_ranges() {
+  # INTENT: the line-range hash of detect.sh and of propose.sh drops the \r
+  # of a CRLF line and joins a range of several lines with \n, no trailing
+  # \n, as the contract states; detect.sh over a CRLF tree gives the facts of
+  # the same tree in LF.
+  # CONTEXT: R4-4 review round 1 (no CRLF fixture with a range of lines).
+  # EXPIRES IF: the contract changes its hash rule.
+  local script lf crlf want want4 f
+  printf 'one\r\ntwo\r\nthree\r\nfour' > "$TEST_TMP/crlf.txt"
+  want="$(printf 'two\nthree' | sha256sum)"
+  want="${want%% *}"
+  for script in detect propose; do
+    sed -n '/^range_sha256() {$/,/^}$/p' "$ACTION_ROOT/bin/$script.sh" > "$TEST_TMP/$script.fn"
+    assert_ne "" "$(cat "$TEST_TMP/$script.fn")" "$script.sh has range_sha256"
+    # shellcheck disable=SC1090
+    source "$TEST_TMP/$script.fn"
+    assert_eq "$want" "$(range_sha256 "$TEST_TMP/crlf.txt" 2 3)" "$script.sh: lines 2-3 of a CRLF file"
+    want4="$(printf 'three\nfour' | sha256sum)"
+    assert_eq "${want4%% *}" "$(range_sha256 "$TEST_TMP/crlf.txt" 3 4)" "$script.sh: a last line without a newline"
+  done
+  # detect.sh over the fixture tree converted to CRLF: the same facts.
+  lf="$TEST_TMP/lf"
+  crlf="$TEST_TMP/crlf"
+  cp -R "$FIXTURES_PROPOSE/tree" "$lf"
+  cp -R "$FIXTURES_PROPOSE/tree" "$crlf"
+  while IFS= read -r -d '' f; do
+    sed 's/$/\r/' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  done < <(find "$crlf" -type f -print0)
+  bash "$ACTION_ROOT/bin/detect.sh" "$lf" "$ACTION_ROOT/bin/filters" | tr -d '\r' > "$TEST_TMP/lf.json"
+  bash "$ACTION_ROOT/bin/detect.sh" "$crlf" "$ACTION_ROOT/bin/filters" | tr -d '\r' > "$TEST_TMP/crlf.json"
+  # The copy is CRLF: 12 lines, 12 more bytes, the same text without \r.
+  assert_eq $(( $(wc -c < "$lf/SECURITY.md") + 12 )) "$(wc -c < "$crlf/SECURITY.md" | tr -d '[:space:]')" "the copy is CRLF"
+  assert_eq "$(cat "$lf/SECURITY.md")" "$(tr -d '\r' < "$crlf/SECURITY.md")" "the copy differs only by \\r"
+  assert_eq "$(cat "$TEST_TMP/lf.json")" "$(cat "$TEST_TMP/crlf.json")" "CRLF and LF trees give the same facts"
+  assert_json "$TEST_TMP/crlf.json" '.facts | length == 10' "the ten facts"
 }

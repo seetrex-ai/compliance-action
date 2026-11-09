@@ -28,7 +28,7 @@ inputs:
     required: false
     default: 'false'
   propose-with-model:
-    description: "With propose, also send the text of the documentation files of a fixed list that exist in the commit (README.md, SECURITY.md, CONTRIBUTING.md, SUPPORT.md, CHANGELOG.md, the threat model, docs/DEPENDENCIES.md; at most 12 files and 256 KiB) so that Seetrex's reader can propose with citations; the job log lists every file before it is sent, and dry-run lists them without sending. Never source code, workflows or lockfiles. Requires propose: true. Off by default."
+    description: "With propose, also send the text of the documentation files of a fixed list that exist in the commit (README.md, SECURITY.md, PRIVACY.md, CONTRIBUTING.md, SUPPORT.md, THREAT_MODEL.md, docs/DEPENDENCIES.md, under the names and directories the reader contract fixes; never CHANGELOG.md; at most 12 files and 256 KiB; a file that is not UTF-8 text or looks like it carries a credential is left out) so that Seetrex's reader can propose with citations; the job log lists every file before it is sent, and dry-run lists them without sending. Never source code, workflows or lockfiles. Requires propose: true. Off by default."
     required: false
     default: 'false'
 

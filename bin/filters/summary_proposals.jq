@@ -7,9 +7,11 @@
 # {state, citations?, pending_fields?}}} as propose.sh assembled it. Output:
 # markdown.
 #
-# Rules (plan R4 section 2.6): per obligation, "proposal ready (N facts
-# cited)", "needs a person (M fields)" or "nothing found"; only paths and
-# line numbers are echoed, never a quote, a field value or a model name.
+# Rules (plan R4 section 2.6): per obligation, "proposal ready (N
+# citations: ...)", "needs a person (M fields to decide; ...)", "nothing
+# found" or "rejected"; only paths and line numbers are echoed, never a
+# quote, a field value or a model name. A citation is a detector's fact or a
+# line the reader cited in a document: both are "citations", never "facts".
 # Every datum echoed is printed only if it matches a closed pattern, else
 # "(unreadable)": the summary is markdown, and nothing in it may come out as
 # markup.
@@ -28,8 +30,8 @@ def locator:
 
 def cited:
   (.citations // [] | if type == "array" then map(select(type == "object")) else [] end) as $c
-  | if ($c | length) == 0 then "no fact cited"
-    else "\($c | length) fact\(if ($c | length) == 1 then "" else "s" end) cited: \($c | map(locator) | join(", "))"
+  | if ($c | length) == 0 then "no citation"
+    else "\($c | length) citation\(if ($c | length) == 1 then "" else "s" end): \($c | map(locator) | join(", "))"
     end;
 
 def proposal_cell:
@@ -38,6 +40,7 @@ def proposal_cell:
   elif .state == "needs_person" then
     "needs a person (\(.pending_fields // [] | if type == "array" then length else 0 end) fields to decide; \(cited))"
   elif .state == "nothing_found" then "nothing found"
+  elif .state == "rejected" then "rejected (one field cited twice)"
   else "(unreadable)" end;
 
 "## Seetrex Compliance (proposals)",
