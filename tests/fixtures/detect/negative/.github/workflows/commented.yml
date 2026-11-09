@@ -16,5 +16,6 @@ jobs:
         run: |
           npm ci
           # npm audit --audit-level=high
+          # then: npm ci && npm audit --audit-level=high
           # cosign sign --yes example.invalid/app
           npm run build
