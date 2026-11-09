@@ -981,6 +981,11 @@ test_intent_line_hash_handles_crlf_ranges() {
   # EXPIRES IF: the contract changes its hash rule.
   local script lf crlf want want4 f
   printf 'one\r\ntwo\r\nthree\r\nfour' > "$TEST_TMP/crlf.txt"
+  # Git for Windows' gawk reads in text mode and drops every \r itself, which
+  # would hide a missing sub(/\r$/, ""): BINMODE=3 makes it read the bytes as
+  # Linux awk does (BINMODE means nothing there). Measured: without it, the
+  # mutant that removes the sub() survived on Windows.
+  awk() { command awk -v BINMODE=3 "$@"; }
   want="$(printf 'two\nthree' | sha256sum)"
   want="${want%% *}"
   for script in detect propose; do
