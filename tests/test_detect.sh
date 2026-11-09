@@ -170,9 +170,12 @@ test_intent_detector_counts_only_real_uncommented_steps() {
   # "trivy"); release_provenance_step is a step that signs or attests, never
   # the cosign installer. A real `npm audit` line of a run block, a
   # `cosign sign-blob` of a folded block and a dependency-review step do
-  # count, with their line.
+  # count, with their line. A comment at the end of a command never makes a
+  # step: `run: echo building # && trivy fs .`, and `npm ci  # later: && npm
+  # audit` in a run block.
   # CONTEXT: R4-4 review round 1 (a commented analyzer counted; the list of
-  # analyzers went beyond plan R4 section 1 as amended by R4-1b).
+  # analyzers went beyond plan R4 section 1 as amended by R4-1b) and round 2
+  # (an end-of-line comment after && made an analyzer).
   # EXPIRES IF: the detectors parse YAML with a real parser.
   local f="$TEST_TMP/neg.json" p="$TEST_TMP/pos.json" t="$FIXTURES_DETECT/positive"
   _detect "$FIXTURES_DETECT/negative" "$f"

@@ -19,3 +19,7 @@ jobs:
           # then: npm ci && npm audit --audit-level=high
           # cosign sign --yes example.invalid/app
           npm run build
+      - run: echo building # && trivy fs .
+      - name: later
+        run: |
+          npm ci  # later: && npm audit

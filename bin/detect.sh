@@ -61,7 +61,9 @@
 # line or a line of a `run: |` / `run: >` block, a `cron:` line. A line whose
 # first non-blank character is `#` is a comment and never counts, in the
 # YAML or inside a run block; a `uses:` value is matched from its start, so
-# a trailing comment never makes a step.
+# a trailing comment never makes a step. A command is cut at its first `#`
+# that starts a comment (at the start of the value or after a blank, outside
+# quotes) before it is matched: `run: echo x # && trivy fs .` is no analyzer.
 #
 # Exclusion (plan R4 section 1): a workflow with a step `uses:
 # seetrex-ai/compliance-action` (any case, `@ref` or a sub-path) is skipped
@@ -242,11 +244,29 @@ emit_line1() {
 # (mawk has no {n} intervals).
 steps_of() {
   awk '
+    # A command without its comment: cut at the first `#` at the start or
+    # after a blank, outside single or double quotes.
+    function uncomment(s,    i, c, q) {
+      q = ""
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (q == "") {
+          if (c == "#" && (i == 1 || substr(s, i - 1, 1) ~ /[ \t]/)) return substr(s, 1, i - 1)
+          if (c == "\"" || c == "\047") q = c
+          else if (c == "\\") i++
+        } else if (c == q) {
+          q = ""
+        } else if (q == "\"" && c == "\\") {
+          i++
+        }
+      }
+      return s
+    }
     { sub(/\r$/, "") }
     inblock {
       if ($0 ~ /^[ \t]*$/) next
       if (match($0, /[^ ]/) - 1 > bindent) {
-        if ($0 !~ /^[ \t]*#/) print NR "\trun\t" $0
+        if ($0 !~ /^[ \t]*#/) print NR "\trun\t" uncomment($0)
         next
       }
       inblock = 0
@@ -265,7 +285,7 @@ steps_of() {
         inblock = 1
         bindent = RLENGTH - 4
       } else {
-        print NR "\trun\t" v
+        print NR "\trun\t" uncomment(v)
       }
       next
     }
