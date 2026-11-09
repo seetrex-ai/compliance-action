@@ -24,7 +24,9 @@ test_intent_runtime_contract_is_derived_from_the_contract() {
     --slurpfile facts "$CONTRACT_DIR/facts.schema.json" -f "$CONTRACT_DIR/derive.jq" > "$TEST_TMP/derived.json"
   assert_eq true "$(jq -n --slurpfile a "$TEST_TMP/derived.json" --slurpfile b "$ACTION_ROOT/bin/contract/reader-contract-1.json" \
     '$a[0] == $b[0]' | tr -d '\r')" "bin/contract/reader-contract-1.json is the derivation of the copied contract"
-  assert_file_not_contains "$ACTION_ROOT/bin/contract/reader-contract-1.json" $'\r' "LF line endings"
+  # LF only, counted in bytes (a grep for \r reads green on Git for Windows).
+  assert_eq "$(wc -c < "$ACTION_ROOT/bin/contract/reader-contract-1.json" | tr -d '[:space:]')" \
+    "$(tr -d '\r' < "$ACTION_ROOT/bin/contract/reader-contract-1.json" | wc -c | tr -d '[:space:]')" "LF line endings (no \\r byte)"
   for f in "$CONTRACT_DIR"/templates/*.json; do
     cat="$(basename "$f" .json)"
     [ "$cat" = security_updates_policy ] && continue
