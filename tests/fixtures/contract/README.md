@@ -37,7 +37,16 @@ commit and the hashes above, and regenerate:
 ```
 jq -S -n --slurpfile req propose-request.schema.json \
   --slurpfile resp propose-response.schema.json \
-  --slurpfile facts facts.schema.json -f derive.jq > ../../../bin/contract/reader-contract-1.json
+  --slurpfile facts facts.schema.json --slurpfile targets detector-targets.json \
+  -f derive.jq | tr -d '\r' > ../../../bin/contract/reader-contract-1.json
 ```
 
 (and change `derived_from` in `derive.jq`).
+
+`detector-targets.json` is not a schema: it is the map detector -> layer-D
+fields of `DetectorId::targets()` in `crates/compliance/src/reader/signals.rs`
+at the same commit (the hints of `DetectorId::hint()` set no field), which
+the schemas do not carry. Its `source` names the commit; `derive.jq` refuses
+it if its ids are not the catalogue, if a target is not a layer-D field of
+its category, or if a layer-D field has no detector. Copy it again with the
+schemas.

@@ -21,7 +21,8 @@ test_intent_runtime_contract_is_derived_from_the_contract() {
   local f cat line name sha
   jq -S -n --slurpfile req "$CONTRACT_DIR/propose-request.schema.json" \
     --slurpfile resp "$CONTRACT_DIR/propose-response.schema.json" \
-    --slurpfile facts "$CONTRACT_DIR/facts.schema.json" -f "$CONTRACT_DIR/derive.jq" > "$TEST_TMP/derived.json"
+    --slurpfile facts "$CONTRACT_DIR/facts.schema.json" --slurpfile targets "$CONTRACT_DIR/detector-targets.json" \
+    -f "$CONTRACT_DIR/derive.jq" > "$TEST_TMP/derived.json"
   assert_eq true "$(jq -n --slurpfile a "$TEST_TMP/derived.json" --slurpfile b "$ACTION_ROOT/bin/contract/reader-contract-1.json" \
     '$a[0] == $b[0]' | tr -d '\r')" "bin/contract/reader-contract-1.json is the derivation of the copied contract"
   # LF only, counted in bytes (a grep for \r reads green on Git for Windows).
@@ -47,6 +48,43 @@ test_intent_runtime_contract_is_derived_from_the_contract() {
   while read -r sha name; do
     assert_eq "$sha" "$(sha256sum < "$CONTRACT_DIR/$name" | cut -d' ' -f1)" "$name: the copy README.md names"
   done < <(sed -n '/^```$/,/^```$/p' "$CONTRACT_DIR/README.md" | grep -E '^[0-9a-f]{64}  ' | tr -d '\r')
+}
+
+test_intent_runtime_contract_carries_the_detector_targets() {
+  # INTENT: the map detector -> layer-D fields the runner checks a citation
+  # against (detector_targets of bin/contract/reader-contract-1.json) is the
+  # provenance copy tests/fixtures/contract/detector-targets.json, taken from
+  # DetectorId::targets() of the Seetrex repository at the commit README.md
+  # names; the hints set no field; derive.jq refuses a copy whose ids are not
+  # the catalogue, whose target is not a layer-D field of its category, or
+  # that leaves a layer-D field without a detector.
+  # CONTEXT: R4-4 review round 2 (a layer-D citation was accepted with any
+  # fact sent: a codeowners_file fact set cvd_policy.in_place); the schemas
+  # do not carry the map, so it is copied with its source.
+  # EXPIRES IF: the contract's schemas carry the map themselves.
+  local rt="$ACTION_ROOT/bin/contract/reader-contract-1.json" t="$CONTRACT_DIR/detector-targets.json" commit bad
+  assert_eq true "$(jq -n --slurpfile a "$rt" --slurpfile b "$t" '$a[0].detector_targets == $b[0].targets' | tr -d '\r')" \
+    "the runtime map is the provenance copy"
+  commit="$(sed -n 's/^(`\([0-9a-f]\{40\}\)`):$/\1/p' "$CONTRACT_DIR/README.md" | tr -d '\r')"
+  assert_ne "" "$commit" "README.md names the commit"
+  assert_json "$t" ".source | startswith(\"Seetrex repository, commit $commit, crates/compliance/src/reader/signals.rs, DetectorId::targets()\")" \
+    "the copy names the same commit and its source function"
+  assert_json "$rt" '[.detector_targets.dependency_update_config, .detector_targets.threat_model_file,
+    .detector_targets.supported_versions_table, .detector_targets.codeowners_file] | all(. == [])' "the hints set no field"
+  _derive_with() {
+    jq -S -n --slurpfile req "$CONTRACT_DIR/propose-request.schema.json" \
+      --slurpfile resp "$CONTRACT_DIR/propose-response.schema.json" \
+      --slurpfile facts "$CONTRACT_DIR/facts.schema.json" --slurpfile targets "$1" \
+      -f "$CONTRACT_DIR/derive.jq" > /dev/null 2>&1
+  }
+  bad="$TEST_TMP/targets.json"
+  _derive_with "$t" || fail "derive.jq refused the copy itself"
+  jq '.targets.security_policy_file = [{category: "cvd_disclosure_report", field: "cvd_policy.enforced"}]' "$t" > "$bad"
+  if _derive_with "$bad"; then fail "derive.jq accepted a target that is no layer-D field"; fi
+  jq '.targets.security_policy_file = []' "$t" > "$bad"
+  if _derive_with "$bad"; then fail "derive.jq accepted a layer-D field without a detector"; fi
+  jq 'del(.targets.codeowners_file)' "$t" > "$bad"
+  if _derive_with "$bad"; then fail "derive.jq accepted ids that are not the catalogue"; fi
 }
 
 test_intent_contract_validator_checks_the_keywords_it_reads() {

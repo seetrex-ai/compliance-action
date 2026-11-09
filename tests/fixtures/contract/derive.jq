@@ -5,7 +5,8 @@
 # Invocation (tests/test_contract.sh, and by hand when the contract moves):
 #   jq -S -n --slurpfile req propose-request.schema.json \
 #     --slurpfile resp propose-response.schema.json \
-#     --slurpfile facts facts.schema.json -f derive.jq
+#     --slurpfile facts facts.schema.json --slurpfile targets detector-targets.json \
+#     -f derive.jq
 #
 # Output: {contract: 1, model_documents, detector_ids, categories: {<category>:
 #   {state, leaves, model_fields, detector_fields, scan_fields, pending_fields}}}
@@ -14,6 +15,11 @@
 # field, or a descriptive field the contract fixes). security_updates_policy
 # has no envelope: leaves is null. A leaf of another shape is an error: the
 # runner only knows booleans.
+# detector_targets: per detector id, the {category, field} pairs a fact of
+# that detector may back (DetectorId::targets() of the Seetrex repository,
+# copied in detector-targets.json: the schemas do not carry it). Checked
+# here against the schemas: the ids are exactly the catalogue, every target
+# is a layer-D field of its category, every layer-D field has a detector.
 
 def leaves($prefix):
   if has("properties") then
@@ -31,6 +37,7 @@ def citation_refs:
   | ."$ref";
 
 ($resp[0]["$defs"]) as $d
+| $targets[0].targets as $t
 | {
     contract: 1,
     derived_from: "reader contract 1, Seetrex repository commit 8f4e1ac5 (crates/compliance/reader/contract), by tests/fixtures/contract/derive.jq",
@@ -50,5 +57,13 @@ def citation_refs:
                           then [$d.scan_citation.properties.field.const] else [] end),
             pending_fields: enum_of("pending_fields_" + $cat)
           }})
-      | from_entries)
+      | from_entries),
+    detector_targets: $t
   }
+| if ($t | keys) != (.detector_ids | sort) then error("derive.jq: detector-targets.json ids are not the catalogue")
+  elif ([$t[][] | . as $x | $x.field | IN($d["detector_fields_" + $x.category].enum // [] | .[]) | not] | any)
+  then error("derive.jq: a detector target is not a layer-D field of its category")
+  elif ([.categories | to_entries[] | .key as $c | .value.detector_fields[]
+         | . as $f | [$t[][] | select(.category == $c and .field == $f)] | length == 0] | any)
+  then error("derive.jq: a layer-D field has no detector")
+  else . end

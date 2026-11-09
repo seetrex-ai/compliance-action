@@ -47,7 +47,9 @@
 #   6. Every citation is checked here: its field must be citable in its
 #      category by its layer (contract), a layer-M citation must name a
 #      document this run sent, a layer-D citation must be exactly a fact this
-#      run sent ({path, line_start, line_end} and its hash), the scan citation
+#      run sent ({path, line_start, line_end} and its hash) of a detector
+#      whose targets (detector_targets of the contract file, from
+#      DetectorId::targets()) name that field of that category, the scan citation
 #      must carry exactly the three values sent; a line citation is then
 #      rehydrated from the local file and its quote_sha256 compared. Anything
 #      else is dropped. Two citations for one field reject the category whole
@@ -123,7 +125,8 @@ done
 [ -f "$BIN_DIR/detect.sh" ] || { printf 'propose.sh: detect.sh is missing\n' >&2; exit 1; }
 [ -f "$BIN_DIR/doccheck.pl" ] || { printf 'propose.sh: doccheck.pl is missing\n' >&2; exit 1; }
 CONTRACT="$BIN_DIR/contract/reader-contract-1.json"
-jq -e '.contract == 1 and (.model_documents | type) == "array" and (.categories | type) == "object"' \
+jq -e '.contract == 1 and (.model_documents | type) == "array" and (.categories | type) == "object"
+  and (.detector_targets | type) == "object"' \
   "$CONTRACT" > /dev/null 2>&1 \
   || { printf 'propose.sh: bin/contract/reader-contract-1.json is missing or unreadable\n' >&2; exit 1; }
 TREE="$WORK/tree"
@@ -445,7 +448,8 @@ jq -e '(.proposals | type) == "object"' "$P/resp" > /dev/null 2>&1 || propose_fa
 # fields of each layer. Each citation becomes one line:
 #   <category> <index> <kind> <field> <path> <start> <end> <sha256>
 # kind `line` (a layer-M citation of a document this run sent, or a layer-D
-# citation that is exactly a fact this run sent: both rehydrated below),
+# citation that is exactly a fact this run sent by a detector that targets
+# that field of that category: both rehydrated below),
 # `scan` (the scan citation, with exactly the values this run sent) or `bad`.
 jq -r --slurpfile obl "$P/obligations.json" --slurpfile contract "$CONTRACT" \
   --slurpfile facts "$P/facts.json" --slurpfile docs "$P/documents.json" --slurpfile scan "$P/scan.json" \
@@ -458,6 +462,7 @@ jq -r --slurpfile obl "$P/obligations.json" --slurpfile contract "$CONTRACT" \
     and ((.quote_sha256 | type) == "string") and (.quote_sha256 | test("^[0-9a-f]{64}$"));
   ([$obl[0][].category]) as $wanted
   | $contract[0].categories as $cats
+  | $contract[0].detector_targets as $targets
   | [$docs[0][].path] as $sent_docs
   | $facts[0].facts as $sent_facts
   | $scan[0] as $s
@@ -477,7 +482,8 @@ jq -r --slurpfile obl "$P/obligations.json" --slurpfile contract "$CONTRACT" \
      elif ($c.field | IN($k.detector_fields[])) then
        (if ($c | line_ok) and $c.source == null
            and ([$sent_facts[] | select(.path == $c.path and .line_start == $c.line_start
-                  and .line_end == $c.line_end and .line_sha256 == $c.quote_sha256)] | length) > 0
+                  and .line_end == $c.line_end and .line_sha256 == $c.quote_sha256)
+                 | select(any(($targets[.id] // [])[]; .category == $cat and .field == $c.field))] | length) > 0
         then "line" else "bad" end)
      elif ($c.field | IN($k.model_fields[])) then
        (if ($c | line_ok) and $c.source == null and ($c.path | IN($sent_docs[])) then "line" else "bad" end)

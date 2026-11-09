@@ -1,0 +1,28 @@
+{
+  "source": "Seetrex repository, commit 8f4e1ac581868a6d18c58063c544696c332ce6fa, crates/compliance/src/reader/signals.rs, DetectorId::targets(): the layer-D field(s) each detector sets; a hint (DetectorId::hint) sets none",
+  "targets": {
+    "dependency_review_step": [
+      {"category": "third_party_components_report", "field": "due_diligence.applies_to_open_source"}
+    ],
+    "dependency_update_config": [],
+    "security_policy_file": [
+      {"category": "cvd_disclosure_report", "field": "cvd_policy.in_place"}
+    ],
+    "security_contact": [
+      {"category": "cvd_disclosure_report", "field": "vulnerability_information_sharing.reporting_contact_address_provided"},
+      {"category": "user_information_report", "field": "security_information.vulnerability_contact_point"}
+    ],
+    "security_analyzer_step": [
+      {"category": "security_testing_report", "field": "security_testing.tests_applied"}
+    ],
+    "scheduled_security_analysis": [
+      {"category": "security_testing_report", "field": "security_testing.regular_cadence_defined"}
+    ],
+    "release_provenance_step": [
+      {"category": "security_testing_report", "field": "update_distribution.secure_mechanisms_in_place"}
+    ],
+    "threat_model_file": [],
+    "supported_versions_table": [],
+    "codeowners_file": []
+  }
+}
