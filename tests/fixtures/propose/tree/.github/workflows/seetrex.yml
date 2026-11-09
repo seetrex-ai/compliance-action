@@ -1,0 +1,15 @@
+name: seetrex
+on:
+  push:
+  schedule:
+    - cron: "0 4 * * *"
+jobs:
+  record:
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: seetrex-ai/compliance-action@0123456789abcdef0123456789abcdef01234567
+      - run: trivy fs .

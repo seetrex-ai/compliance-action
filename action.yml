@@ -23,6 +23,14 @@ inputs:
     description: Ask Seetrex to close the record of this repository. Sends no documents.
     required: false
     default: 'false'
+  propose:
+    description: "After the push, run the deterministic detectors over the commit and ask Seetrex to propose attestations for the obligations that have no document; the proposals come back as the job artifact seetrex-proposals, for a person to review and commit. Sends facts only (detector id, path, line numbers, hash of those lines), never the lines themselves. Off by default."
+    required: false
+    default: 'false'
+  propose-with-model:
+    description: "With propose, also send the text of the documentation files of a fixed list that exist in the commit (README.md, SECURITY.md, CONTRIBUTING.md, SUPPORT.md, CHANGELOG.md, the threat model, docs/DEPENDENCIES.md; at most 12 files and 256 KiB) so that Seetrex's reader can propose with citations; the job log lists every file before it is sent, and dry-run lists them without sending. Never source code, workflows or lockfiles. Requires propose: true. Off by default."
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -51,6 +59,8 @@ runs:
         INPUT_STRICT: ${{ inputs.strict }}
         INPUT_REQUEST_REPIN: ${{ inputs.request-repin }}
         INPUT_REQUEST_CLOSE: ${{ inputs.request-close }}
+        INPUT_PROPOSE: ${{ inputs.propose }}
+        INPUT_PROPOSE_WITH_MODEL: ${{ inputs.propose-with-model }}
       # BASH_ENV is dropped so that no file it names runs (or turns on
       # tracing) inside the step; run.sh also turns tracing off first.
       run: env -u BASH_ENV bash "$GITHUB_ACTION_PATH/bin/run.sh"
@@ -61,6 +71,14 @@ runs:
       with:
         name: seetrex-record
         path: ${{ steps.seetrex.outputs.record }}
+        if-no-files-found: error
+
+    - name: Upload the Seetrex proposals
+      if: always() && steps.seetrex.outputs.proposals != ''
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: seetrex-proposals
+        path: ${{ steps.seetrex.outputs.proposals }}
         if-no-files-found: error
 
     - name: Remove the Seetrex output and work directories
