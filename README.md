@@ -60,6 +60,69 @@ The Action does not replace Art. 14 vulnerability reporting, nor a conformity
 assessment. It gives you a record of what was measured, when, and what the rule
 catalogue said about it.
 
+## Proposals (optional, off by default)
+
+The obligations that read an attestation stay `not_documented` until you
+write its file by hand. Two inputs, both `false` by default, add an automatic
+reader with citation that proposes those files for you to review. They come
+with `v1.1.0`, which is not released yet; `v1.0.0` has neither.
+
+- `propose: true`: after the push, deterministic detectors run in your runner
+  over the pushed commit (the same tree that is scanned) and look for facts: a
+  reporting or disclosure section, a security contact and a "Supported
+  Versions" table in `SECURITY.md`, a contact in `.well-known/security.txt`, a
+  threat model file, a `CODEOWNERS` file, a Dependabot or Renovate
+  configuration, and workflow steps that review dependencies, run a security
+  analyzer (on a schedule or not) or sign or attest a release. A fact leaves
+  the runner as a detector id, a path, line numbers and the SHA-256 of those
+  lines, never as the lines themselves.
+- `propose-with-model: true` (it needs `propose: true`; alone, the run stops
+  with a fixed line and sends nothing): the Action also sends the whole text
+  of the documents of a closed list that exist in the commit, and Seetrex
+  passes them to an external LLM provider, which proposes values, each with a
+  literal quote of the lines it relies on. The list: `README.md`;
+  `SECURITY.md`, `.github/SECURITY.md`, `docs/SECURITY.md`; `PRIVACY.md`;
+  `CONTRIBUTING.md`, `.github/CONTRIBUTING.md`, `docs/CONTRIBUTING.md`;
+  `SUPPORT.md`, `.github/SUPPORT.md`, `docs/SUPPORT.md`; `THREAT_MODEL.md`,
+  `.github/THREAT_MODEL.md`, `docs/THREAT_MODEL.md`, `docs/threat-model.md`;
+  `docs/DEPENDENCIES.md`. No other file is ever sent as text.
+- `dry-run: true` together with them: the job log lists the facts, the scan
+  values and every document that would be sent (path, bytes, SHA-256), and
+  nothing is sent: no token is requested and no request is made.
+
+Proposals are asked only for the categories whose obligations the push left
+`not_documented`. Each quote of a document is checked three times: by
+Seetrex's reading service against the text it received, by Seetrex's server
+against the same text before it drops it, and by the Action against the file
+in your commit (the SHA-256 of the cited lines). A detector citation must be
+exactly a fact this run sent, and its lines are hashed again from your
+commit. A citation that fails any check is dropped and its field stays
+`false`, "not found".
+
+The result is the run artifact `seetrex-proposals`: per category a
+`<category>.json` (every field settled) or a `<category>.json.pending` (fields
+left to you), and a `<category>.review.md` that shows each proposed `true` as
+`path:lines` with the quoted lines taken from your commit, each `false` as
+"not found", and each field left to you as "decide yourself". The job summary
+shows only paths and line numbers.
+
+Nothing takes effect until a person commits it. The Action reads only `*.json`
+files in `.seetrex/attestations/`, so a proposal counts only once someone
+copies it there and commits it; the next push sends it like any other
+attestation file. The fields that exempt an obligation, and the others that
+only you can decide, are never proposed: they are written at the value that
+exempts nothing and listed under "decide yourself". `security_updates_policy`,
+whose fields include the placing-on-market date and the end of the support
+period, is never proposed at all: you get only its review file. A failed
+proposal is a warning in the job (a failed job only with `strict: true`) and
+never affects the record of the push.
+
+```yaml
+        with:
+          propose: true
+          propose-with-model: true  # sends the text of the listed documents; read the sections below first
+```
+
 ## Scope: private repositories only
 
 In this phase the Action accepts **private** and **internal** repositories.
@@ -112,9 +175,34 @@ Sent to `api.seetrex.com`:
   stores a new document (`source_commit` in `seetrex-record.json`) and, only if a run asks for one, the
   branch and time of a re-pin request or the time of a close request; the name is echoed back there but not stored; the actor's login and id are not read.
 
-Not sent: your source code, the identity of the author or committer (beyond
-the token's `actor` claims above), commit messages, your `github.token`, or
-anything else from the runner.
+With `propose: true` (off by default), after the push, also sent to
+`api.seetrex.com`:
+
+- the facts of the detectors: detector id, path, first and last line number,
+  and the SHA-256 of those lines; never the lines;
+- the scan of the push as three values: the number of findings in the reduced
+  report, the number of packages in the SBOM, and the SHA-256 of the report
+  exactly as it was sent;
+- the categories to propose for, and a fresh OIDC token of the run for each
+  request (the same claims as above).
+
+With `propose-with-model: true` as well: the whole text of each document of
+the closed list above that exists in the commit, with its path, size and
+SHA-256. Each one is listed in the job log (path, bytes, SHA-256) before
+anything is requested, and what is listed is exactly what is sent. A document
+is left out, and the log says why, when it is empty, over 64 KiB, not UTF-8
+text, or when a line looks like a credential (a private key block, a cloud,
+forge or service token, a bearer token, a URL with a password, among others);
+and past 12 documents or 256 KiB in all. Documents travel whole: a README that
+contains code examples, commands or configuration snippets sends them as part
+of its text.
+
+Never sent as text, whatever the inputs: your source code files, workflow
+files, lockfiles and dependency-manager configuration (the detectors read some
+of them in the runner, and only the facts above leave), any file outside the
+closed list other than the attestation files above, the identity of the
+author or committer (beyond the token's `actor` claims above), commit
+messages, your `github.token`, or anything else from the runner.
 
 Network destinations of a run, all over HTTPS: `api.seetrex.com`; the Trivy
 release download from `github.com` and the release-asset host it redirects to
@@ -126,7 +214,11 @@ the runner's OIDC token service; and the GitHub Actions cache and artifact
 services (the database cache and the `seetrex-record.json` upload). The
 step that restores the Trivy database cache runs before the Action's own
 checks (private repository, push, default branch), so it runs even on a run
-that those checks then stop.
+that those checks then stop. The proposal step adds no destination to the
+runner: its requests go only to `api.seetrex.com` (after a token from the
+runner's OIDC service), and the `seetrex-proposals` upload goes to the GitHub
+artifact service. With `propose-with-model: true`, the text of the documents
+then travels on from Seetrex to an external LLM provider (next section).
 
 ## What Seetrex can and cannot do with it
 
@@ -135,11 +227,32 @@ Please read this before installing.
 - **Results are never published.** There is no public page, no badge and no
   option to publish. Seetrex does not show the record to third parties. Who
   else sees something: Cloudflare, which fronts `api.seetrex.com`, sees each
-  request at the edge; GitHub stores the job summary and the run artifact
-  under your repository's own permissions.
+  request at the edge; GitHub stores the job summary and the run artifacts
+  under your repository's own permissions (the review files of
+  `seetrex-proposals` quote the cited lines of your files); with
+  `propose-with-model: true`, an external LLM provider receives the text of
+  the documents sent.
 - **Seetrex can read what you send.** The record is stored on Seetrex servers
   and is not end-to-end encrypted. It is not sold and it is not shown to
   third parties.
+- **Documents are read in memory and not stored.** With
+  `propose-with-model: true`, Seetrex's server holds the text of the documents
+  in memory only while the proposal is built. Its reading service checks them
+  for credentials again (a match is not passed on) and sends the text, with
+  the paths and the names of the fields it looks for, to an external LLM
+  provider, through Seetrex's own account and under that provider's terms.
+  Seetrex's server then checks every citation against the text and drops the
+  text. Seetrex does not store it: not in its database, not on disk, not in
+  its logs. What Seetrex keeps is a proposals log without text: the numeric
+  repository id, the time, and per category the state of the proposal and
+  each citation as field, path, line numbers and line hash; for each request
+  to the reading service, a hash of the set of documents (their paths and
+  SHA-256 values), the number of fields looked for, the path of each document
+  left out by the credential check with the names of the patterns that
+  matched, and, when the provider was called, the name of the model that
+  answered, its stop reason, the token usage and the cost. Seetrex's answer,
+  without text, waits in memory for at most 10 minutes for the Action to
+  collect it.
 - **What the offline check proves, and what it does not.** `seetrex-verifier
   verify-chain` recomputes every hash link of the `chain` block and the head
   hash, and prints its own banner and a scope statement when they hold. That
