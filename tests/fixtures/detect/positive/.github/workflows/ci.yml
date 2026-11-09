@@ -1,0 +1,16 @@
+name: ci
+# This workflow runs next to seetrex-ai/compliance-action, in another file.
+on:
+  push:
+  schedule:
+    - cron: "0 2 * * *"
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # not seetrex-ai/compliance-action
+      - name: audit
+        run: |
+          npm ci
+          npm audit --audit-level=high
+      - uses: actions/dependency-review-action@0123456789abcdef0123456789abcdef01234567

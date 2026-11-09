@@ -1,0 +1,10 @@
+name: record
+on:
+  schedule:
+    - cron: "0 4 * * *"
+jobs:
+  record:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: "Seetrex-AI/Compliance-Action@v1"
+      - run: trivy fs .

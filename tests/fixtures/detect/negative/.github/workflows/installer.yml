@@ -1,0 +1,11 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: sigstore/cosign-installer@0123456789abcdef0123456789abcdef01234567
+      - run: cosign version
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # then actions/attest-build-provenance

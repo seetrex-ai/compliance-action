@@ -1,0 +1,12 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: sigstore/cosign-installer@0123456789abcdef0123456789abcdef01234567
+      - run: >
+          make dist &&
+          cosign sign-blob --yes dist/app.tar.gz

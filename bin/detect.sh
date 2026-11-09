@@ -25,27 +25,48 @@
 #                               Renovate configuration file
 #   security_policy_file        the heading of a report/disclosure section
 #                               of SECURITY.md (root, .github/, docs/)
-#   security_contact            a line of SECURITY.md with an e-mail address
-#                               or a `/security/advisories/new` URL, or the
-#                               `Contact:` line of .well-known/security.txt
-#   security_analyzer_step      a workflow step that runs an analyzer
-#                               (CodeQL, Trivy, grype, Semgrep, OSV-Scanner,
-#                               cargo/npm audit, gitleaks, zizmor, Scorecard)
+#   security_contact            the first line of SECURITY.md with an e-mail
+#                               address, or the `Contact:` line of
+#                               .well-known/security.txt (RFC 9116). An SSH
+#                               remote (`git@github.com:org/repo.git`) or a
+#                               user in a URL (`ssh://git@host/...`) is not an
+#                               address; a URL is never a contact here, the
+#                               `.../security/advisories/new` form of the
+#                               pushing repository above all (contract 1,
+#                               detector_id: a third party cannot open it in
+#                               a private repository)
+#   security_analyzer_step      a workflow step that runs a product security
+#                               analyzer: CodeQL, Trivy, grype, Semgrep,
+#                               OSV-Scanner, `cargo audit`, `npm audit` (plan
+#                               R4 section 1; gitleaks, zizmor, Scorecard and
+#                               the other audits do not count)
 #   scheduled_security_analysis the `cron:` line of a workflow that runs an
 #                               analyzer
-#   release_provenance_step     a workflow step that signs or attests a
-#                               release (attest-build-provenance, cosign,
-#                               slsa-github-generator)
+#   release_provenance_step     a workflow step that signs or attests:
+#                               actions/attest-build-provenance,
+#                               slsa-framework/slsa-github-generator, or a
+#                               `cosign sign|sign-blob|attest|attest-blob`
+#                               command (installing cosign is not signing)
 #   threat_model_file           line 1 of THREAT_MODEL.md,
-#                               docs/THREAT_MODEL.md or docs/threat-model.md
+#                               .github/THREAT_MODEL.md, docs/THREAT_MODEL.md
+#                               or docs/threat-model.md
 #   supported_versions_table    the "Supported Versions" heading of SECURITY.md
 #   codeowners_file             line 1 of CODEOWNERS (root, .github/, docs/)
 # One fact per detector and file: the first matching line.
 #
-# Exclusion (plan R4 section 1): a workflow that names the step
-# `seetrex-ai/compliance-action` is skipped whole by every workflow detector,
-# so the Action's own vulnerability scan never counts as the user's security
-# testing (circular evidence).
+# Workflows are read step by step (steps_of below): a `uses:` line, a `run:`
+# line or a line of a `run: |` / `run: >` block, a `cron:` line. A line whose
+# first non-blank character is `#` is a comment and never counts, in the
+# YAML or inside a run block; a `uses:` value is matched from its start, so
+# a trailing comment never makes a step.
+#
+# Exclusion (plan R4 section 1): a workflow with a step `uses:
+# seetrex-ai/compliance-action` (any case, `@ref` or a sub-path) is skipped
+# whole by every workflow detector, so the Action's own vulnerability scan
+# never counts as the user's security testing (circular evidence). In the
+# Action's own repository (GITHUB_REPOSITORY seetrex-ai/compliance-action,
+# any case) a step `uses: ./` is the Action too. A comment that names the
+# Action excludes nothing.
 set +x
 set -euo pipefail
 umask 077
@@ -57,29 +78,39 @@ fi
 TREE="$1"
 FILTERS="$2"
 
-readonly SEETREX_STEP='seetrex-ai/compliance-action'
 readonly SECURITY_FILES='SECURITY.md .github/SECURITY.md docs/SECURITY.md'
-readonly THREAT_MODEL_FILES='THREAT_MODEL.md docs/THREAT_MODEL.md docs/threat-model.md'
+readonly THREAT_MODEL_FILES='THREAT_MODEL.md .github/THREAT_MODEL.md docs/THREAT_MODEL.md docs/threat-model.md'
 readonly CODEOWNERS_FILES='CODEOWNERS .github/CODEOWNERS docs/CODEOWNERS'
 readonly DEPENDABOT_FILES='.github/dependabot.yml .github/dependabot.yaml'
 readonly RENOVATE_FILES='renovate.json renovate.json5 .renovaterc .renovaterc.json .github/renovate.json .github/renovate.json5'
 readonly SECURITY_TXT='.well-known/security.txt'
 
-# Extended regular expressions (grep -E). `uses:` steps are matched by their
-# action name, commands by the word at the start of a command.
-readonly RE_USES='^[[:space:]]*(-[[:space:]]*)?uses:[[:space:]]*["'"'"']?'
-readonly RE_CMD='(^|run:|&&|;|\|)[[:space:]]*'
-readonly RE_DEP_REVIEW="${RE_USES}actions/dependency-review-action[@/]"
-readonly RE_ANALYZER_USES="${RE_USES}(github/codeql-action/analyze|aquasecurity/trivy-action|anchore/scan-action|returntocorp/semgrep-action|semgrep/semgrep-action|google/osv-scanner-action|google/osv-scanner/actions/scanner|rustsec/audit-check|actions-rust-lang/audit|gitleaks/gitleaks-action|zizmorcore/zizmor-action|ossf/scorecard-action)[@/]"
-readonly RE_ANALYZER_CMD="${RE_CMD}(cargo[[:space:]]+audit|npm[[:space:]]+audit|pnpm[[:space:]]+audit|yarn[[:space:]]+(npm[[:space:]]+)?audit|semgrep|trivy|grype|gitleaks|zizmor|osv-scanner)([[:space:]]|\$)"
-readonly RE_CRON='^[[:space:]]*(-[[:space:]]*)?cron:[[:space:]]*'
-readonly RE_PROVENANCE_USES="${RE_USES}(actions/attest-build-provenance|actions/attest|sigstore/cosign-installer|sigstore/gh-action-sigstore-python|slsa-framework/slsa-github-generator)[@/]"
-readonly RE_PROVENANCE_CMD="${RE_CMD}cosign[[:space:]]+(sign|attest)([[:space:]]|\$)"
+# Extended regular expressions (grep -E, case-insensitive), matched against
+# the value of a step (steps_of): a `uses:` value from its first character
+# (an optional quote), a command at the start of a command of a run line.
+readonly RE_VALUE='^["'"'"']?'
+readonly RE_CMD='(^|&&|;|\|)[[:space:]]*'
+readonly RE_SEETREX_STEP="${RE_VALUE}seetrex-ai/compliance-action([@/[:space:]\"']|\$)"
+readonly RE_SELF_STEP="${RE_VALUE}\./?[\"']?([[:space:]]|\$)"
+readonly RE_DEP_REVIEW="${RE_VALUE}actions/dependency-review-action[@/]"
+readonly RE_ANALYZER_USES="${RE_VALUE}(github/codeql-action/analyze|aquasecurity/trivy-action|anchore/scan-action|returntocorp/semgrep-action|semgrep/semgrep-action|google/osv-scanner-action|google/osv-scanner/actions/scanner|rustsec/audit-check|actions-rust-lang/audit)[@/]"
+readonly RE_ANALYZER_CMD="${RE_CMD}(cargo[[:space:]]+audit|npm[[:space:]]+audit|semgrep|trivy|grype|osv-scanner)([[:space:]]|\$)"
+readonly RE_PROVENANCE_USES="${RE_VALUE}(actions/attest-build-provenance|slsa-framework/slsa-github-generator)[@/]"
+readonly RE_PROVENANCE_CMD="${RE_CMD}cosign[[:space:]]+(sign|sign-blob|attest|attest-blob)([[:space:]]|\$)"
 readonly RE_PACKAGE_ECOSYSTEM='^[[:space:]]*(-[[:space:]]*)?package-ecosystem:'
 readonly RE_REPORT_HEADING='^#{1,6}[[:space:]].*(report|disclos)'
 readonly RE_SUPPORTED_HEADING='^#{1,6}[[:space:]].*supported[[:space:]]+versions'
-readonly RE_CONTACT='[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|/security/advisories/new'
+# An address, plus the character after it when it is `:` or `/` (an SSH
+# remote or a user in a URL, never an address).
+readonly RE_ADDRESS='[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}[:/]?'
 readonly RE_SECURITY_TXT_CONTACT='^Contact:[[:space:]]*[^[:space:]]'
+
+# The Action's own repository: there, `uses: ./` is the Action.
+SELF_REPO=false
+repo_lc="$(printf '%s' "${GITHUB_REPOSITORY:-}" | tr '[:upper:]' '[:lower:]')"
+if [ "$repo_lc" = seetrex-ai/compliance-action ]; then
+  SELF_REPO=true
+fi
 
 WORK="$(mktemp -d)"
 # shellcheck disable=SC2317  # runs from the EXIT trap below
@@ -136,6 +167,24 @@ emit_first() {
   fi
 }
 
+# first_address <file>: number of the first line with an e-mail address
+# that is not an SSH remote or the user of a URL; empty when none.
+first_address() {
+  local hit nr m
+  while IFS= read -r hit || [ -n "$hit" ]; do
+    hit="${hit%$'\r'}"
+    nr="${hit%%:*}"
+    m="${hit#*:}"
+    case "$m" in
+      *: | */) continue ;;
+    esac
+    if [[ "$nr" =~ ^[0-9]+$ ]]; then
+      printf '%s\n' "$nr"
+      return 0
+    fi
+  done < <(grep -a -n -o -E -e "$RE_ADDRESS" -- "$1" 2> /dev/null || true)
+}
+
 # emit_line1 <id> <path>: cites line 1 of a non-empty file.
 emit_line1() {
   if [ "$(line_count "$TREE/$2")" -ge 1 ]; then
@@ -143,33 +192,96 @@ emit_line1() {
   fi
 }
 
+# steps_of <workflow>: the step lines of a workflow, one per line, written
+# under WORK (never printed): <line number> TAB <kind> TAB <value>, kind
+# `uses` (value: what follows `uses:`), `run` (an inline command, or one line
+# of a block scalar `run: |` / `run: >` / `run:` followed by a more indented
+# block) or `cron` (no value). Comment lines never come out. POSIX awk only
+# (mawk has no {n} intervals).
+steps_of() {
+  awk '
+    { sub(/\r$/, "") }
+    inblock {
+      if ($0 ~ /^[ \t]*$/) next
+      if (match($0, /[^ ]/) - 1 > bindent) {
+        if ($0 !~ /^[ \t]*#/) print NR "\trun\t" $0
+        next
+      }
+      inblock = 0
+    }
+    /^[ \t]*#/ { next }
+    match($0, /^[ \t]*(-[ \t]+)?uses:/) {
+      v = substr($0, RLENGTH + 1)
+      sub(/^[ \t]+/, "", v)
+      print NR "\tuses\t" v
+      next
+    }
+    match($0, /^[ \t]*(-[ \t]+)?run:/) {
+      v = substr($0, RLENGTH + 1)
+      sub(/^[ \t]+/, "", v)
+      if (v == "" || v ~ /^[|>][-+0-9]*[ \t]*(#.*)?$/) {
+        inblock = 1
+        bindent = RLENGTH - 4
+      } else {
+        print NR "\trun\t" v
+      }
+      next
+    }
+    /^[ \t]*(-[ \t]+)?cron:/ { print NR "\tcron\t" }
+  ' "$1"
+}
+
+# first_step <steps.tsv> <kind> <re>: number of the first step line of that
+# kind whose value matches the ERE <re> (case-insensitive); empty when none.
+first_step() {
+  local nr kind value
+  while IFS=$'\t' read -r nr kind value || [ -n "$nr" ]; do
+    [ "$kind" = "$2" ] || continue
+    if [ "$2" = cron ] || printf '%s\n' "$value" | grep -q -i -E -e "$3"; then
+      printf '%s\n' "$nr"
+      return 0
+    fi
+  done < "$1"
+}
+
 # ------------------------------------------------------------- workflows
 shopt -s nullglob
 for wf in "$TREE"/.github/workflows/*.yml "$TREE"/.github/workflows/*.yaml; do
   [ -f "$wf" ] && [ ! -L "$wf" ] || continue
   rel="${wf#"$TREE/"}"
+  steps_of "$wf" > "$WORK/steps.tsv"
   # The Action's own workflow is never evidence.
-  if grep -a -q -F -e "$SEETREX_STEP" -- "$wf" 2> /dev/null; then
+  if [ -n "$(first_step "$WORK/steps.tsv" uses "$RE_SEETREX_STEP")" ]; then
     continue
   fi
-  emit_first dependency_review_step "$rel" "$RE_DEP_REVIEW"
-  n="$(first_match "$wf" "$RE_ANALYZER_USES")"
+  if [ "$SELF_REPO" = true ] && [ -n "$(first_step "$WORK/steps.tsv" uses "$RE_SELF_STEP")" ]; then
+    continue
+  fi
+  n="$(first_step "$WORK/steps.tsv" uses "$RE_DEP_REVIEW")"
+  if [ -n "$n" ]; then
+    emit dependency_review_step "$rel" "$n" "$n"
+  fi
+  n="$(first_step "$WORK/steps.tsv" uses "$RE_ANALYZER_USES")"
   if [ -z "$n" ]; then
-    n="$(first_match "$wf" "$RE_ANALYZER_CMD")"
+    n="$(first_step "$WORK/steps.tsv" run "$RE_ANALYZER_CMD")"
   fi
   if [ -n "$n" ]; then
     emit security_analyzer_step "$rel" "$n" "$n"
-    emit_first scheduled_security_analysis "$rel" "$RE_CRON"
+    n="$(first_step "$WORK/steps.tsv" cron '')"
+    if [ -n "$n" ]; then
+      emit scheduled_security_analysis "$rel" "$n" "$n"
+    fi
   fi
-  n="$(first_match "$wf" "$RE_PROVENANCE_USES")"
+  n="$(first_step "$WORK/steps.tsv" uses "$RE_PROVENANCE_USES")"
   if [ -z "$n" ]; then
-    n="$(first_match "$wf" "$RE_PROVENANCE_CMD")"
+    n="$(first_step "$WORK/steps.tsv" run "$RE_PROVENANCE_CMD")"
   fi
   if [ -n "$n" ]; then
     emit release_provenance_step "$rel" "$n" "$n"
   fi
 done
 shopt -u nullglob
+rm -f -- "$WORK/steps.tsv"
 
 # ------------------------------------------------------- dependency updates
 for f in $DEPENDABOT_FILES; do
@@ -185,7 +297,10 @@ done
 for f in $SECURITY_FILES; do
   tree_file "$f" || continue
   emit_first security_policy_file "$f" "$RE_REPORT_HEADING"
-  emit_first security_contact "$f" "$RE_CONTACT"
+  n="$(first_address "$TREE/$f")"
+  if [ -n "$n" ]; then
+    emit security_contact "$f" "$n" "$n"
+  fi
   emit_first supported_versions_table "$f" "$RE_SUPPORTED_HEADING"
 done
 if tree_file "$SECURITY_TXT"; then

@@ -158,3 +158,73 @@ test_intent_detectors_read_only_the_commit_tree() {
   assert_eq 0 "$(token_call_count)" "dry run: no token"
   assert_eq "# Security Policy" "$(head -n 1 "$WS/SECURITY.md")" "the worktree is untouched"
 }
+
+FIXTURES_DETECT="$TESTS_DIR/fixtures/detect"
+
+test_intent_detector_counts_only_real_uncommented_steps() {
+  # INTENT: a workflow detector counts only real steps: a commented `uses:`,
+  # `run:`, `cron:` or a commented line inside a run block never makes a
+  # fact; security_analyzer_step is CodeQL, Semgrep, Trivy, grype,
+  # OSV-Scanner, `cargo audit`, `npm audit` only (gitleaks, zizmor,
+  # Scorecard, `pnpm audit`, `yarn audit` do not count, nor a step named
+  # "trivy"); release_provenance_step is a step that signs or attests, never
+  # the cosign installer. A real `npm audit` line of a run block, a
+  # `cosign sign-blob` of a folded block and a dependency-review step do
+  # count, with their line.
+  # CONTEXT: R4-4 review round 1 (a commented analyzer counted; the list of
+  # analyzers went beyond plan R4 section 1 as amended by R4-1b).
+  # EXPIRES IF: the detectors parse YAML with a real parser.
+  local f="$TEST_TMP/neg.json" p="$TEST_TMP/pos.json" t="$FIXTURES_DETECT/positive"
+  _detect "$FIXTURES_DETECT/negative" "$f"
+  assert_json "$f" '[.facts[] | select(.path | startswith(".github/workflows/"))] == []' \
+    "negative tree: no workflow fact (commented steps, non-product analyzers, the cosign installer, the Action in capitals)"
+  _detect "$t" "$p"
+  assert_eq "15 15 $(_lines_sha "$t/.github/workflows/ci.yml" 15 15)" "$(_fact "$p" security_analyzer_step .github/workflows/ci.yml)" \
+    "the npm audit line of a run block"
+  assert_eq "6 6 $(_lines_sha "$t/.github/workflows/ci.yml" 6 6)" "$(_fact "$p" scheduled_security_analysis .github/workflows/ci.yml)" \
+    "the cron of the analyzer's workflow"
+  assert_eq "16 16 $(_lines_sha "$t/.github/workflows/ci.yml" 16 16)" "$(_fact "$p" dependency_review_step .github/workflows/ci.yml)" \
+    "the dependency-review step"
+  assert_eq "12 12 $(_lines_sha "$t/.github/workflows/release.yml" 12 12)" "$(_fact "$p" release_provenance_step .github/workflows/release.yml)" \
+    "cosign sign-blob in a folded block, not the installer line"
+}
+
+test_intent_detector_excludes_the_action_by_its_uses_step_only() {
+  # INTENT: the Action's own workflow is excluded by a `uses:` step whose
+  # value starts with seetrex-ai/compliance-action, in any case; a comment
+  # that names the Action (a line of its own or after another step) does not
+  # exclude a legitimate workflow; `uses: ./` is the Action only in the
+  # Action's own repository (GITHUB_REPOSITORY seetrex-ai/compliance-action).
+  # CONTEXT: R4-4 review round 1 (a case-sensitive grep of the whole file:
+  # a comment excluded a workflow, capitals did not).
+  # EXPIRES IF: the Action stops scanning vulnerabilities itself.
+  local f="$TEST_TMP/f.json"
+  _detect "$FIXTURES_DETECT/negative" "$f"
+  assert_json "$f" '[.facts[] | select(.path == ".github/workflows/seetrex-upper.yml")] == []' \
+    "Seetrex-AI/Compliance-Action in capitals: excluded"
+  _detect "$FIXTURES_DETECT/positive" "$f"
+  assert_json "$f" '[.facts[] | select(.path == ".github/workflows/ci.yml")] | length == 3' \
+    "a workflow whose comments name the Action is still read"
+  GITHUB_REPOSITORY=example-org/example-repo _detect "$FIXTURES_DETECT/self" "$f"
+  assert_json "$f" '[.facts[] | select(.id == "security_analyzer_step")] | length == 1' "uses: ./ in another repository: not the Action"
+  GITHUB_REPOSITORY=Seetrex-AI/Compliance-Action _detect "$FIXTURES_DETECT/self" "$f"
+  assert_json "$f" '.facts == []' "uses: ./ in the Action's own repository: excluded"
+}
+
+test_intent_detector_contact_is_an_address_not_a_remote_or_the_own_form() {
+  # INTENT: security_contact is an e-mail address of SECURITY.md (or the
+  # Contact: of security.txt): an SSH remote (git@github.com:org/repo.git),
+  # the user of an ssh:// URL and the .../security/advisories/new form of the
+  # repository are never a contact; a real address on a later line is cited.
+  # CONTEXT: contract 1 (detector_id: the advisories form of the pushing
+  # repository is never a security_contact fact) and R4-4 review round 1.
+  # EXPIRES IF: the repositories stop being treated as private.
+  local f="$TEST_TMP/f.json" t="$FIXTURES_DETECT/positive"
+  _detect "$FIXTURES_DETECT/negative" "$f"
+  assert_json "$f" '[.facts[] | select(.id == "security_contact")] == []' "remotes and the advisories form: no contact"
+  _detect "$t" "$f"
+  assert_eq "4 4 $(_lines_sha "$t/SECURITY.md" 4 4)" "$(_fact "$f" security_contact SECURITY.md)" "the address on line 4, not the remote on line 3"
+  # The hint for the threat model also reads .github/THREAT_MODEL.md.
+  assert_eq "1 1 $(_lines_sha "$t/.github/THREAT_MODEL.md" 1 1)" "$(_fact "$f" threat_model_file .github/THREAT_MODEL.md)" \
+    ".github/THREAT_MODEL.md is a threat-model hint"
+}
