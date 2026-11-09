@@ -71,6 +71,7 @@ readonly CATEGORY_MAP='{
 readonly RE_PATH='^\.?[A-Za-z0-9_-][A-Za-z0-9._-]*(/\.?[A-Za-z0-9_-][A-Za-z0-9._-]*)*$'
 readonly RE_FIELD='^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$'
 
+# shellcheck disable=SC2016  # literal backticks
 L_NO_OIDC='The workflow lacks `permissions: id-token: write`: no proposal was requested.'
 
 if [ $# -ne 5 ]; then
@@ -487,6 +488,7 @@ while IFS= read -r category || [ -n "$category" ]; do
   esac
   {
     printf '# %s\n\n' "$category"
+    # shellcheck disable=SC2016  # literal backticks (Markdown)
     case "$state" in
       ready) printf 'Proposal ready: review each citation below; to accept, copy `%s.json` to `.seetrex/attestations/` and commit it. The commit is your signature.\n\n' "$category" ;;
       needs_person) printf 'Needs a person: decide the pending fields below, then rename `%s.json.pending` to `%s.json` under `.seetrex/attestations/` and commit it. A pending field left `false` may exempt the obligation: decide it.\n\n' "$category" "$category" ;;
