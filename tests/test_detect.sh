@@ -215,15 +215,21 @@ test_intent_detector_contact_is_an_address_not_a_remote_or_the_own_form() {
   # INTENT: security_contact is an e-mail address of SECURITY.md (or the
   # Contact: of security.txt): an SSH remote (git@github.com:org/repo.git),
   # the user of an ssh:// URL and the .../security/advisories/new form of the
-  # repository are never a contact; a real address on a later line is cited.
+  # repository are never a contact, in SECURITY.md nor as the Contact: of
+  # security.txt (any case, http or https, www., a trailing /); a real
+  # address on a later line is cited, and so is the advisories form of
+  # another repository in security.txt.
   # CONTEXT: contract 1 (detector_id: the advisories form of the pushing
-  # repository is never a security_contact fact) and R4-4 review round 1.
+  # repository is never a security_contact fact) and R4-4 review rounds 1
+  # and 2 (security.txt took any Contact: line, the own form included).
   # EXPIRES IF: the repositories stop being treated as private.
   local f="$TEST_TMP/f.json" t="$FIXTURES_DETECT/positive"
-  _detect "$FIXTURES_DETECT/negative" "$f"
+  GITHUB_REPOSITORY=example-org/example-repo _detect "$FIXTURES_DETECT/negative" "$f"
   assert_json "$f" '[.facts[] | select(.id == "security_contact")] == []' "remotes and the advisories form: no contact"
-  _detect "$t" "$f"
+  GITHUB_REPOSITORY=example-org/example-repo _detect "$t" "$f"
   assert_eq "4 4 $(_lines_sha "$t/SECURITY.md" 4 4)" "$(_fact "$f" security_contact SECURITY.md)" "the address on line 4, not the remote on line 3"
+  assert_eq "2 2 $(_lines_sha "$t/.well-known/security.txt" 2 2)" "$(_fact "$f" security_contact .well-known/security.txt)" \
+    "security.txt: another repository's form on line 2, not the own form on line 1"
   # The hint for the threat model also reads .github/THREAT_MODEL.md.
   assert_eq "1 1 $(_lines_sha "$t/.github/THREAT_MODEL.md" 1 1)" "$(_fact "$f" threat_model_file .github/THREAT_MODEL.md)" \
     ".github/THREAT_MODEL.md is a threat-model hint"

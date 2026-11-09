@@ -26,15 +26,18 @@
 #   security_policy_file        the heading of a report/disclosure section
 #                               of SECURITY.md (root, .github/, docs/)
 #   security_contact            the first line of SECURITY.md with an e-mail
-#                               address, or the `Contact:` line of
-#                               .well-known/security.txt (RFC 9116). An SSH
-#                               remote (`git@github.com:org/repo.git`) or a
-#                               user in a URL (`ssh://git@host/...`) is not an
-#                               address; a URL is never a contact here, the
+#                               address, or the first `Contact:` line of
+#                               .well-known/security.txt (RFC 9116: an
+#                               address or a URL) that is not the
 #                               `.../security/advisories/new` form of the
-#                               pushing repository above all (contract 1,
-#                               detector_id: a third party cannot open it in
-#                               a private repository)
+#                               pushing repository (any case, http or https,
+#                               with or without `www.` or a trailing `/`):
+#                               contract 1, detector_id: a third party cannot
+#                               open that form in a private repository. In
+#                               SECURITY.md only an address counts, never a
+#                               URL; an SSH remote (`git@github.com:o/r.git`)
+#                               or a user in a URL (`ssh://git@host/...`) is
+#                               not an address
 #   security_analyzer_step      a workflow step that runs a product security
 #                               analyzer: CodeQL, Trivy, grype, Semgrep,
 #                               OSV-Scanner, `cargo audit`, `npm audit` (plan
@@ -185,6 +188,45 @@ first_address() {
   done < <(grep -a -n -o -E -e "$RE_ADDRESS" -- "$1" 2> /dev/null || true)
 }
 
+# own_advisories_form <value>: true when a security.txt Contact: value is the
+# .../security/advisories/new form of the pushing repository (any case, http
+# or https, with or without www. or a trailing /). Without GITHUB_REPOSITORY,
+# the form of any repository (it may be this one).
+own_advisories_form() {
+  local v="${1,,}"
+  v="${v#https://}"
+  v="${v#http://}"
+  v="${v#www.}"
+  v="${v%/}"
+  if [ -n "$repo_lc" ]; then
+    [ "$v" = "github.com/$repo_lc/security/advisories/new" ]
+  else
+    [[ "$v" =~ ^github\.com/[^/]+/[^/]+/security/advisories/new$ ]]
+  fi
+}
+
+# first_contact <security.txt>: number of the first `Contact:` line whose
+# value is not the advisories form of the pushing repository; empty when
+# none. The line itself is never kept.
+first_contact() {
+  local hit nr v
+  while IFS= read -r hit || [ -n "$hit" ]; do
+    hit="${hit%$'\r'}"
+    nr="${hit%%:*}"
+    v="${hit#*:}"
+    v="${v#*:}"
+    v="${v#"${v%%[![:space:]]*}"}"
+    v="${v%"${v##*[![:space:]]}"}"
+    if own_advisories_form "$v"; then
+      continue
+    fi
+    if [[ "$nr" =~ ^[0-9]+$ ]]; then
+      printf '%s\n' "$nr"
+      return 0
+    fi
+  done < <(grep -a -n -i -E -e "$RE_SECURITY_TXT_CONTACT" -- "$1" 2> /dev/null || true)
+}
+
 # emit_line1 <id> <path>: cites line 1 of a non-empty file.
 emit_line1() {
   if [ "$(line_count "$TREE/$2")" -ge 1 ]; then
@@ -304,7 +346,10 @@ for f in $SECURITY_FILES; do
   emit_first supported_versions_table "$f" "$RE_SUPPORTED_HEADING"
 done
 if tree_file "$SECURITY_TXT"; then
-  emit_first security_contact "$SECURITY_TXT" "$RE_SECURITY_TXT_CONTACT"
+  n="$(first_contact "$TREE/$SECURITY_TXT")"
+  if [ -n "$n" ]; then
+    emit security_contact "$SECURITY_TXT" "$n" "$n"
+  fi
 fi
 
 # ------------------------------------------------------------------ hints
