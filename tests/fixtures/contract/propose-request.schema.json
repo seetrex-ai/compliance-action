@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:seetrex:reader-contract:1:propose-request",
+  "title": "POST /v1/action/propose request",
+  "description": "Runner to compliance-server. Two forms: start a proposal ({start}) or poll it ({ticket}). The repository is the one of the OIDC token, never a body field. documents only travels with propose-with-model. Rules JSON Schema cannot state: in every fact line_end >= line_start; in every document bytes is the UTF-8 length of text and sha256 its SHA-256; document paths are unique; the bytes of all documents add up to at most 262144 (256 KiB).",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "start"],
+      "properties": {
+        "version": { "$ref": "#/$defs/version" },
+        "start": { "$ref": "#/$defs/start" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "ticket"],
+      "properties": {
+        "version": { "$ref": "#/$defs/version" },
+        "ticket": { "$ref": "#/$defs/ticket" }
+      }
+    }
+  ],
+  "$defs": {
+    "version": {
+      "description": "Version of the reader contract. A new version is a new contract: every party moves together.",
+      "const": 1
+    },
+    "ticket": {
+      "description": "Opaque handle the 202 answer gave; bound to the repository of the token that started it.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{32,64}$"
+    },
+    "start": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["categories", "facts"],
+      "properties": {
+        "categories": {
+          "description": "The attestable categories whose obligations the push left not_documented.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/category" }
+        },
+        "facts": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/fact" }
+        },
+        "documents": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/document" }
+        },
+        "scan": { "$ref": "#/$defs/scan" }
+      }
+    },
+    "scan": {
+      "description": "The vulnerability scan of the same push, reduced to counts and a hash: the runner computes it over the reduced Trivy report it sent in the push; same trust as the push. finding_count is the number of findings, scanned_packages the number of packages the scan covered (zero findings over zero packages proves nothing), report_sha256 the SHA-256 of that reduced report. Absent when the push carried no scan. Only the field market_availability.no_known_exploitable_vulnerabilities of monitoring_lifecycle_report reads it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["finding_count", "scanned_packages", "report_sha256"],
+      "properties": {
+        "finding_count": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "scanned_packages": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "report_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "category": {
+      "description": "The ten attestable categories: one template each in crates/compliance/attestations/templates/.",
+      "enum": [
+        "availability_resilience_report",
+        "cvd_disclosure_report",
+        "data_protection_report",
+        "monitoring_lifecycle_report",
+        "secure_config_report",
+        "secure_design_report",
+        "security_testing_report",
+        "security_updates_policy",
+        "third_party_components_report",
+        "user_information_report"
+      ]
+    },
+    "document": {
+      "description": "A text document of fixed name, whole, as it is in the tree of GITHUB_SHA.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "bytes", "sha256", "text"],
+      "properties": {
+        "path": { "$ref": "#/$defs/model_document_path" },
+        "bytes": { "type": "integer", "minimum": 1, "maximum": 65536 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 65536 }
+      }
+    },
+    "model_document_path": {
+      "description": "Closed list of exact names the model may read: text documents only, no globs, never source code, workflows, dependabot.yml, lockfiles or CHANGELOG.md (those are read by the detectors, in the runner). Lowercase security.md is not listed: GitHub recognises SECURITY.md; whether it also recognises the lowercase name is not verified.",
+      "enum": [
+        "README.md",
+        "SECURITY.md",
+        ".github/SECURITY.md",
+        "docs/SECURITY.md",
+        "PRIVACY.md",
+        "CONTRIBUTING.md",
+        ".github/CONTRIBUTING.md",
+        "docs/CONTRIBUTING.md",
+        "SUPPORT.md",
+        ".github/SUPPORT.md",
+        "docs/SUPPORT.md",
+        "THREAT_MODEL.md",
+        ".github/THREAT_MODEL.md",
+        "docs/THREAT_MODEL.md",
+        "docs/threat-model.md",
+        "docs/DEPENDENCIES.md"
+      ]
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "line_start", "line_end", "line_sha256"],
+      "properties": {
+        "id": { "$ref": "#/$defs/detector_id" },
+        "path": { "$ref": "#/$defs/repo_path" },
+        "line_start": { "$ref": "#/$defs/line" },
+        "line_end": { "$ref": "#/$defs/line" },
+        "line_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "detector_id": {
+      "description": "Closed catalogue of detectors (plan R4 section 1, layer D, plus the hints the plan names). The step and the workflow of seetrex-ai/compliance-action itself are never a fact. security_contact is a reporting contact a third party can reach: an e-mail address, the Contact: of .well-known/security.txt (RFC 9116), or a URL outside the pushing repository; the .../security/advisories/new form of the pushing repository itself is never a security_contact fact, because the experiment treats every repository as private and a third party cannot open that form in a private repository.",
+      "enum": [
+        "dependency_review_step",
+        "dependency_update_config",
+        "security_policy_file",
+        "security_contact",
+        "security_analyzer_step",
+        "scheduled_security_analysis",
+        "release_provenance_step",
+        "threat_model_file",
+        "supported_versions_table",
+        "codeowners_file"
+      ]
+    },
+    "repo_path": {
+      "description": "Repository-relative path with forward slashes: no leading slash, no empty, '.' or '..' segment.",
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^\\.?[A-Za-z0-9_-][A-Za-z0-9._-]*(/\\.?[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "sha256": {
+      "description": "Lowercase hex SHA-256. Validators in Python must use re.fullmatch (or \\Z): with re.match or re.search, $ also accepts a trailing newline.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

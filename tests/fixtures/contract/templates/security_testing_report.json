@@ -1,0 +1,21 @@
+{
+  "schema": "seetrex.attestation.v2",
+  "category": "security_testing_report",
+  "attested_via": "person",
+  "payload": {
+    "security_testing": {
+      "tests_applied": false,
+      "reviews_applied": false,
+      "regular_cadence_defined": false
+    },
+    "update_distribution": {
+      "secure_mechanisms_in_place": false,
+      "timely_remediation_ensured": false,
+      "automatic_distribution": {
+        "applicability_assessed": false,
+        "applicable": false,
+        "automatic_manner_provided": false
+      }
+    }
+  }
+}

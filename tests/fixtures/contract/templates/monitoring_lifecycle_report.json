@@ -1,0 +1,20 @@
+{
+  "schema": "seetrex.attestation.v2",
+  "category": "monitoring_lifecycle_report",
+  "attested_via": "person",
+  "payload": {
+    "market_availability": {
+      "no_known_exploitable_vulnerabilities": false
+    },
+    "activity_monitoring": {
+      "recording_enabled": false,
+      "covers_data_services_functions_access": false,
+      "user_opt_out_mechanism": false
+    },
+    "data_lifecycle": {
+      "secure_permanent_removal": false,
+      "transfer_applicable": false,
+      "secure_transfer": false
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:seetrex:reader-contract:1:facts",
+  "title": "Detector facts",
+  "description": "What the runner's detectors found in the tree of GITHUB_SHA: a detector id and a line locator with the hash of those lines. Never text. Rules JSON Schema cannot state: line_end >= line_start. Line-range hash: the lines line_start..line_end (1-based, inclusive) of the file at GITHUB_SHA, each without its terminator (\\n or \\r\\n), joined with \\n, no trailing \\n, hashed as UTF-8 with SHA-256, lowercase hex.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "facts"],
+  "properties": {
+    "version": { "$ref": "#/$defs/version" },
+    "facts": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/fact" }
+    }
+  },
+  "$defs": {
+    "version": {
+      "description": "Version of the reader contract. A new version is a new contract: every party moves together.",
+      "const": 1
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "line_start", "line_end", "line_sha256"],
+      "properties": {
+        "id": { "$ref": "#/$defs/detector_id" },
+        "path": { "$ref": "#/$defs/repo_path" },
+        "line_start": { "$ref": "#/$defs/line" },
+        "line_end": { "$ref": "#/$defs/line" },
+        "line_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "detector_id": {
+      "description": "Closed catalogue of detectors (plan R4 section 1, layer D, plus the hints the plan names). The step and the workflow of seetrex-ai/compliance-action itself are never a fact. security_contact is a reporting contact a third party can reach: an e-mail address, the Contact: of .well-known/security.txt (RFC 9116), or a URL outside the pushing repository; the .../security/advisories/new form of the pushing repository itself is never a security_contact fact, because the experiment treats every repository as private and a third party cannot open that form in a private repository.",
+      "enum": [
+        "dependency_review_step",
+        "dependency_update_config",
+        "security_policy_file",
+        "security_contact",
+        "security_analyzer_step",
+        "scheduled_security_analysis",
+        "release_provenance_step",
+        "threat_model_file",
+        "supported_versions_table",
+        "codeowners_file"
+      ]
+    },
+    "repo_path": {
+      "description": "Repository-relative path with forward slashes: no leading slash, no empty, '.' or '..' segment.",
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^\\.?[A-Za-z0-9_-][A-Za-z0-9._-]*(/\\.?[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "sha256": {
+      "description": "Lowercase hex SHA-256. Validators in Python must use re.fullmatch (or \\Z): with re.match or re.search, $ also accepts a trailing newline.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schema": "seetrex.attestation.v2",
+  "category": "user_information_report",
+  "attested_via": "person",
+  "payload": {
+    "manufacturer_identification": {
+      "identity_and_contact_provided": false,
+      "product_unique_identification": false
+    },
+    "security_information": {
+      "vulnerability_contact_point": false,
+      "cvd_policy_location_published": false,
+      "intended_purpose_and_security_properties": false,
+      "foreseeable_misuse_risks_documented": false
+    },
+    "conformity_and_support": {
+      "doc_address_applicable": false,
+      "doc_internet_address_provided": false,
+      "support_type_and_end_date_published": false,
+      "support_period_consistent_with_policy": false
+    },
+    "user_instructions": {
+      "commissioning_secure_use": false,
+      "security_impact_of_changes": false,
+      "update_installation": false,
+      "secure_decommissioning_data_removal": false,
+      "auto_update_optout_instructions": false,
+      "integration_applicable": false,
+      "integrator_information_provided": false,
+      "sbom_disclosure_decided": false,
+      "sbom_location_provided": false
+    }
+  }
+}

@@ -1,0 +1,1787 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:seetrex:reader-contract:1:propose-response",
+  "title": "POST /v1/action/propose response",
+  "description": "compliance-server to runner. 202 {status: pending, ticket} while the proposal is being built; 200 {status: done, proposals} when it is. Per category: ready (every field settled, an envelope the person may commit as <category>.json), needs_person (an envelope with the pending fields left to the person, written as <category>.json.pending) or nothing_found (no cited true: no envelope, the unfilled template would decide VIOLATED). No free-text string anywhere: never repository text, never a model name. The payload of each envelope is the category's template, leaf for leaf (payload_<category>), and a layer-M citation may only name a document of the closed list (model_line_citation). Rules JSON Schema cannot state: a leaf outside pending_fields is true if and only if a citation names it; a pending leaf is never cited and carries exactly its pending value, fixed by a const in payload_<category> (the value that exempts nothing: an exempting condition at the value that does not exempt, both halves of an applicability pair true, a dependent or cross-category assertion false), so a person who renames <category>.json.pending without deciding gets the connector's gap, never a SATISFIED; pending_fields lists every pending field of the category; at most one citation per field; line_end >= line_start; the keys of proposals are exactly the categories the request asked for.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "status",
+        "ticket"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "status": {
+          "const": "pending"
+        },
+        "ticket": {
+          "$ref": "#/$defs/ticket"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "status",
+        "proposals"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "status": {
+          "const": "done"
+        },
+        "proposals": {
+          "$ref": "#/$defs/proposals"
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "version": {
+      "description": "Version of the reader contract. A new version is a new contract: every party moves together.",
+      "const": 1
+    },
+    "ticket": {
+      "description": "Opaque handle the 202 answer gave; bound to the repository of the token that started it.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{32,64}$"
+    },
+    "proposals": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "availability_resilience_report": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/nothing_found"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "envelope",
+                "citations"
+              ],
+              "properties": {
+                "state": {
+                  "const": "ready"
+                },
+                "envelope": {
+                  "$ref": "#/$defs/envelope_availability_resilience_report"
+                },
+                "citations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/model_line_citation",
+                    "properties": {
+                      "field": {
+                        "$ref": "#/$defs/model_fields_availability_resilience_report"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "cvd_disclosure_report": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/nothing_found"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "envelope",
+                "citations"
+              ],
+              "properties": {
+                "state": {
+                  "const": "ready"
+                },
+                "envelope": {
+                  "$ref": "#/$defs/envelope_cvd_disclosure_report"
+                },
+                "citations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/model_line_citation",
+                        "properties": {
+                          "field": {
+                            "$ref": "#/$defs/model_fields_cvd_disclosure_report"
+                          }
+                        }
+                      },
+                      {
+                        "$ref": "#/$defs/line_citation",
+                        "properties": {
+                          "field": {
+                            "$ref": "#/$defs/detector_fields_cvd_disclosure_report"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "data_protection_report": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/nothing_found"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "envelope",
+                "citations"
+              ],
+              "properties": {
+                "state": {
+                  "const": "ready"
+                },
+                "envelope": {
+                  "$ref": "#/$defs/envelope_data_protection_report"
+                },
+                "citations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/model_line_citation",
+                    "properties": {
+                      "field": {
+                        "$ref": "#/$defs/model_fields_data_protection_report"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "monitoring_lifecycle_report": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/nothing_found"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "envelope",
+                "citations",
+                "pending_fields"
+              ],
+              "properties": {
+                "state": {
+                  "const": "needs_person"
+                },
+                "envelope": {
+                  "$ref": "#/$defs/envelope_monitoring_lifecycle_report"
+                },
+                "citations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/model_line_citation",
+                        "properties": {
+                          "field": {
+                            "$ref": "#/$defs/model_fields_monitoring_lifecycle_report"
+                          }
+                        }
+                      },
+                      {
+                        "$ref": "#/$defs/scan_citation"
+                      }
+                    ]
+                  }
+                },
+                "pending_fields": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/pending_fields_monitoring_lifecycle_report"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "secure_config_report": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/nothing_found"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "envelope",
+                "citations",
+                "pending_fields"
+              ],
+              "properties": {
+                "state": {
+                  "const": "needs_person"
+                },
+                "envelope": {
+                  "$ref": "#/$defs/envelope_secure_config_report"
+                },
+                "citations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/model_line_citation",
+                    "properties": {
+                      "field": {
+                        "$ref": "#/$defs/model_fields_secure_config_report"
+                      }
+                    }
+                  }
+                },
+                "pending_fields": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/pending_fields_secure_config_report"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "secure_design_report": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/nothing_found"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "envelope",
+                "citations"
+              ],
+              "properties": {
+                "state": {
+                  "const": "ready"
+                },
+                "envelope": {
+                  "$ref": "#/$defs/envelope_secure_design_report"
+                },
+                "citations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/model_line_citation",
+                    "properties": {
+                      "field": {
+                        "$ref": "#/$defs/model_fields_secure_design_report"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "security_testing_report": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/nothing_found"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "envelope",
+                "citations",
+                "pending_fields"
+              ],
+              "properties": {
+                "state": {
+                  "const": "needs_person"
+                },
+                "envelope": {
+                  "$ref": "#/$defs/envelope_security_testing_report"
+                },
+                "citations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/model_line_citation",
+                        "properties": {
+                          "field": {
+                            "$ref": "#/$defs/model_fields_security_testing_report"
+                          }
+                        }
+                      },
+                      {
+                        "$ref": "#/$defs/line_citation",
+                        "properties": {
+                          "field": {
+                            "$ref": "#/$defs/detector_fields_security_testing_report"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                "pending_fields": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/pending_fields_security_testing_report"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "security_updates_policy": {
+          "description": "Never proposed (plan R4 section 1): always left to the person, with no envelope.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state",
+            "pending_fields"
+          ],
+          "properties": {
+            "state": {
+              "const": "needs_person"
+            },
+            "pending_fields": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/pending_fields_security_updates_policy"
+              }
+            }
+          }
+        },
+        "third_party_components_report": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/nothing_found"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "envelope",
+                "citations"
+              ],
+              "properties": {
+                "state": {
+                  "const": "ready"
+                },
+                "envelope": {
+                  "$ref": "#/$defs/envelope_third_party_components_report"
+                },
+                "citations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/model_line_citation",
+                        "properties": {
+                          "field": {
+                            "$ref": "#/$defs/model_fields_third_party_components_report"
+                          }
+                        }
+                      },
+                      {
+                        "$ref": "#/$defs/line_citation",
+                        "properties": {
+                          "field": {
+                            "$ref": "#/$defs/detector_fields_third_party_components_report"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "user_information_report": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/nothing_found"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "state",
+                "envelope",
+                "citations",
+                "pending_fields"
+              ],
+              "properties": {
+                "state": {
+                  "const": "needs_person"
+                },
+                "envelope": {
+                  "$ref": "#/$defs/envelope_user_information_report"
+                },
+                "citations": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/model_line_citation",
+                        "properties": {
+                          "field": {
+                            "$ref": "#/$defs/model_fields_user_information_report"
+                          }
+                        }
+                      },
+                      {
+                        "$ref": "#/$defs/line_citation",
+                        "properties": {
+                          "field": {
+                            "$ref": "#/$defs/detector_fields_user_information_report"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                "pending_fields": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/pending_fields_user_information_report"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "category": {
+      "description": "The ten attestable categories: one template each in crates/compliance/attestations/templates/.",
+      "enum": [
+        "availability_resilience_report",
+        "cvd_disclosure_report",
+        "data_protection_report",
+        "monitoring_lifecycle_report",
+        "secure_config_report",
+        "secure_design_report",
+        "security_testing_report",
+        "security_updates_policy",
+        "third_party_components_report",
+        "user_information_report"
+      ]
+    },
+    "nothing_found": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "const": "nothing_found"
+        }
+      }
+    },
+    "line_citation": {
+      "description": "A line citation of a layer-D field: a true and where the detector found it, path and lines in the tree of GITHUB_SHA and the line-range hash of those lines (same rule as line_sha256 in facts.schema.json). The runner rehydrates the quote from its own file and drops the citation if the hash does not match.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "value",
+        "path",
+        "line_start",
+        "line_end",
+        "quote_sha256"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/field_name"
+        },
+        "value": {
+          "const": true
+        },
+        "path": {
+          "$ref": "#/$defs/repo_path"
+        },
+        "line_start": {
+          "$ref": "#/$defs/line"
+        },
+        "line_end": {
+          "$ref": "#/$defs/line"
+        },
+        "quote_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "scan_citation": {
+      "description": "The one scanner-backed true (plan R4 section 1): the vulnerability scan of the same push covered at least one package and has zero entries.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "value",
+        "source",
+        "finding_count",
+        "scanned_packages",
+        "report_sha256"
+      ],
+      "properties": {
+        "field": {
+          "const": "market_availability.no_known_exploitable_vulnerabilities"
+        },
+        "value": {
+          "const": true
+        },
+        "source": {
+          "const": "vuln_scan"
+        },
+        "finding_count": {
+          "const": 0
+        },
+        "scanned_packages": {
+          "description": "Packages the scan covered: at least one, so zero findings means nothing found, not nothing scanned.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "report_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "field_name": {
+      "description": "Dotted path of a leaf of the category's template.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+    },
+    "repo_path": {
+      "description": "Repository-relative path with forward slashes: no leading slash, no empty, '.' or '..' segment.",
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^\\.?[A-Za-z0-9_-][A-Za-z0-9._-]*(/\\.?[A-Za-z0-9_-][A-Za-z0-9._-]*)*$"
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "sha256": {
+      "description": "Lowercase hex SHA-256. Validators in Python must use re.fullmatch (or \\Z): with re.match or re.search, $ also accepts a trailing newline.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "citable_fields_availability_resilience_report": {
+      "enum": [
+        "availability_protection.essential_functions_protected",
+        "availability_protection.post_incident_availability",
+        "dos_resilience.measures_in_place",
+        "network_impact.minimised"
+      ]
+    },
+    "citable_fields_cvd_disclosure_report": {
+      "enum": [
+        "cvd_policy.in_place",
+        "vulnerability_information_sharing.reporting_contact_address_provided",
+        "cvd_policy.enforced",
+        "cvd_policy.publicly_available",
+        "vulnerability_information_sharing.measures_in_place",
+        "fixed_vulnerability_disclosure.practice_in_place",
+        "fixed_vulnerability_disclosure.content.description_included",
+        "fixed_vulnerability_disclosure.content.affected_product_identification",
+        "fixed_vulnerability_disclosure.content.impacts_included",
+        "fixed_vulnerability_disclosure.content.severity_included",
+        "fixed_vulnerability_disclosure.content.remediation_information"
+      ]
+    },
+    "citable_fields_data_protection_report": {
+      "enum": [
+        "access_control.mechanisms_present",
+        "access_control.reports_unauthorised_access",
+        "data_confidentiality.protected",
+        "data_integrity.protected",
+        "data_integrity.reports_corruptions",
+        "data_minimisation.applied"
+      ]
+    },
+    "citable_fields_monitoring_lifecycle_report": {
+      "enum": [
+        "activity_monitoring.recording_enabled",
+        "activity_monitoring.covers_data_services_functions_access",
+        "activity_monitoring.user_opt_out_mechanism",
+        "data_lifecycle.secure_permanent_removal"
+      ]
+    },
+    "citable_fields_secure_config_report": {
+      "enum": [
+        "secure_configuration.secure_by_default",
+        "secure_configuration.reset_to_original_supported",
+        "security_updates_capability.updates_mechanism"
+      ]
+    },
+    "citable_fields_secure_design_report": {
+      "enum": [
+        "risk_based_design.process_applied",
+        "risk_based_design.risk_assessment_documented",
+        "attack_surface.limited",
+        "attack_surface.external_interfaces_covered",
+        "exploitation_mitigation.mechanisms_in_place"
+      ]
+    },
+    "citable_fields_security_testing_report": {
+      "enum": [
+        "security_testing.tests_applied",
+        "security_testing.regular_cadence_defined",
+        "update_distribution.secure_mechanisms_in_place",
+        "security_testing.reviews_applied",
+        "update_distribution.timely_remediation_ensured"
+      ]
+    },
+    "citable_fields_third_party_components_report": {
+      "enum": [
+        "due_diligence.applies_to_open_source",
+        "due_diligence.process_documented",
+        "component_vulnerabilities.upstream_reporting_defined",
+        "component_vulnerabilities.remediation_per_annex1_part2",
+        "component_vulnerabilities.fix_sharing_commitment"
+      ]
+    },
+    "citable_fields_user_information_report": {
+      "enum": [
+        "security_information.vulnerability_contact_point",
+        "manufacturer_identification.identity_and_contact_provided",
+        "manufacturer_identification.product_unique_identification",
+        "security_information.cvd_policy_location_published",
+        "security_information.intended_purpose_and_security_properties",
+        "security_information.foreseeable_misuse_risks_documented",
+        "conformity_and_support.support_type_and_end_date_published",
+        "user_instructions.commissioning_secure_use",
+        "user_instructions.security_impact_of_changes",
+        "user_instructions.update_installation",
+        "user_instructions.secure_decommissioning_data_removal",
+        "user_instructions.auto_update_optout_instructions"
+      ]
+    },
+    "pending_fields_monitoring_lifecycle_report": {
+      "enum": [
+        "data_lifecycle.transfer_applicable",
+        "data_lifecycle.secure_transfer"
+      ]
+    },
+    "pending_fields_secure_config_report": {
+      "enum": [
+        "secure_configuration.tailor_made_agreement",
+        "security_updates_capability.auto_updates.applicability_assessed",
+        "security_updates_capability.auto_updates.applicable",
+        "security_updates_capability.auto_updates.installed_within_appropriate_timeframe",
+        "security_updates_capability.auto_updates.default_enabled",
+        "security_updates_capability.auto_updates.opt_out_mechanism",
+        "security_updates_capability.auto_updates.user_notification",
+        "security_updates_capability.auto_updates.postpone_option"
+      ]
+    },
+    "pending_fields_security_testing_report": {
+      "enum": [
+        "update_distribution.automatic_distribution.applicability_assessed",
+        "update_distribution.automatic_distribution.applicable",
+        "update_distribution.automatic_distribution.automatic_manner_provided"
+      ]
+    },
+    "pending_fields_security_updates_policy": {
+      "enum": [
+        "policy.product_placed_on_market_at",
+        "policy.support_period_end_at",
+        "policy.expected_use_less_than_5y",
+        "policy.updates_free_of_charge",
+        "policy.updates_disseminated_without_delay",
+        "policy.advisory_messages_provided",
+        "policy.updates_retention_years",
+        "policy.separation_from_functionality.technically_feasible",
+        "policy.separation_from_functionality.provided_separately"
+      ]
+    },
+    "pending_fields_user_information_report": {
+      "enum": [
+        "conformity_and_support.doc_address_applicable",
+        "conformity_and_support.doc_internet_address_provided",
+        "conformity_and_support.support_period_consistent_with_policy",
+        "user_instructions.integration_applicable",
+        "user_instructions.integrator_information_provided",
+        "user_instructions.sbom_disclosure_decided",
+        "user_instructions.sbom_location_provided"
+      ]
+    },
+    "payload_availability_resilience_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "availability_protection",
+        "dos_resilience",
+        "network_impact"
+      ],
+      "properties": {
+        "availability_protection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "essential_functions_protected",
+            "post_incident_availability"
+          ],
+          "properties": {
+            "essential_functions_protected": {
+              "type": "boolean"
+            },
+            "post_incident_availability": {
+              "type": "boolean"
+            }
+          }
+        },
+        "dos_resilience": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "measures_in_place"
+          ],
+          "properties": {
+            "measures_in_place": {
+              "type": "boolean"
+            }
+          }
+        },
+        "network_impact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "minimised"
+          ],
+          "properties": {
+            "minimised": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "envelope_availability_resilience_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "category",
+        "attested_via",
+        "payload"
+      ],
+      "properties": {
+        "schema": {
+          "const": "seetrex.attestation.v2"
+        },
+        "category": {
+          "const": "availability_resilience_report"
+        },
+        "attested_via": {
+          "const": "reader+person"
+        },
+        "payload": {
+          "$ref": "#/$defs/payload_availability_resilience_report"
+        }
+      }
+    },
+    "model_fields_availability_resilience_report": {
+      "enum": [
+        "availability_protection.essential_functions_protected",
+        "availability_protection.post_incident_availability",
+        "dos_resilience.measures_in_place",
+        "network_impact.minimised"
+      ]
+    },
+    "payload_cvd_disclosure_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cvd_policy",
+        "vulnerability_information_sharing",
+        "fixed_vulnerability_disclosure"
+      ],
+      "properties": {
+        "cvd_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "in_place",
+            "enforced",
+            "publicly_available"
+          ],
+          "properties": {
+            "in_place": {
+              "type": "boolean"
+            },
+            "enforced": {
+              "type": "boolean"
+            },
+            "publicly_available": {
+              "type": "boolean"
+            }
+          }
+        },
+        "vulnerability_information_sharing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "measures_in_place",
+            "reporting_contact_address_provided"
+          ],
+          "properties": {
+            "measures_in_place": {
+              "type": "boolean"
+            },
+            "reporting_contact_address_provided": {
+              "type": "boolean"
+            }
+          }
+        },
+        "fixed_vulnerability_disclosure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "practice_in_place",
+            "delay_exception_invoked",
+            "content"
+          ],
+          "properties": {
+            "practice_in_place": {
+              "type": "boolean"
+            },
+            "delay_exception_invoked": {
+              "const": false
+            },
+            "content": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "description_included",
+                "affected_product_identification",
+                "impacts_included",
+                "severity_included",
+                "remediation_information"
+              ],
+              "properties": {
+                "description_included": {
+                  "type": "boolean"
+                },
+                "affected_product_identification": {
+                  "type": "boolean"
+                },
+                "impacts_included": {
+                  "type": "boolean"
+                },
+                "severity_included": {
+                  "type": "boolean"
+                },
+                "remediation_information": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "envelope_cvd_disclosure_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "category",
+        "attested_via",
+        "payload"
+      ],
+      "properties": {
+        "schema": {
+          "const": "seetrex.attestation.v2"
+        },
+        "category": {
+          "const": "cvd_disclosure_report"
+        },
+        "attested_via": {
+          "const": "reader+person"
+        },
+        "payload": {
+          "$ref": "#/$defs/payload_cvd_disclosure_report"
+        }
+      }
+    },
+    "model_fields_cvd_disclosure_report": {
+      "enum": [
+        "cvd_policy.enforced",
+        "cvd_policy.publicly_available",
+        "vulnerability_information_sharing.measures_in_place",
+        "fixed_vulnerability_disclosure.practice_in_place",
+        "fixed_vulnerability_disclosure.content.description_included",
+        "fixed_vulnerability_disclosure.content.affected_product_identification",
+        "fixed_vulnerability_disclosure.content.impacts_included",
+        "fixed_vulnerability_disclosure.content.severity_included",
+        "fixed_vulnerability_disclosure.content.remediation_information"
+      ]
+    },
+    "payload_data_protection_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "access_control",
+        "data_confidentiality",
+        "data_integrity",
+        "data_minimisation"
+      ],
+      "properties": {
+        "access_control": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mechanisms_present",
+            "reports_unauthorised_access"
+          ],
+          "properties": {
+            "mechanisms_present": {
+              "type": "boolean"
+            },
+            "reports_unauthorised_access": {
+              "type": "boolean"
+            }
+          }
+        },
+        "data_confidentiality": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protected"
+          ],
+          "properties": {
+            "protected": {
+              "type": "boolean"
+            }
+          }
+        },
+        "data_integrity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "protected",
+            "reports_corruptions"
+          ],
+          "properties": {
+            "protected": {
+              "type": "boolean"
+            },
+            "reports_corruptions": {
+              "type": "boolean"
+            }
+          }
+        },
+        "data_minimisation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "applied"
+          ],
+          "properties": {
+            "applied": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "envelope_data_protection_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "category",
+        "attested_via",
+        "payload"
+      ],
+      "properties": {
+        "schema": {
+          "const": "seetrex.attestation.v2"
+        },
+        "category": {
+          "const": "data_protection_report"
+        },
+        "attested_via": {
+          "const": "reader+person"
+        },
+        "payload": {
+          "$ref": "#/$defs/payload_data_protection_report"
+        }
+      }
+    },
+    "model_fields_data_protection_report": {
+      "enum": [
+        "access_control.mechanisms_present",
+        "access_control.reports_unauthorised_access",
+        "data_confidentiality.protected",
+        "data_integrity.protected",
+        "data_integrity.reports_corruptions",
+        "data_minimisation.applied"
+      ]
+    },
+    "payload_monitoring_lifecycle_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "market_availability",
+        "activity_monitoring",
+        "data_lifecycle"
+      ],
+      "properties": {
+        "market_availability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "no_known_exploitable_vulnerabilities"
+          ],
+          "properties": {
+            "no_known_exploitable_vulnerabilities": {
+              "type": "boolean"
+            }
+          }
+        },
+        "activity_monitoring": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "recording_enabled",
+            "covers_data_services_functions_access",
+            "user_opt_out_mechanism"
+          ],
+          "properties": {
+            "recording_enabled": {
+              "type": "boolean"
+            },
+            "covers_data_services_functions_access": {
+              "type": "boolean"
+            },
+            "user_opt_out_mechanism": {
+              "type": "boolean"
+            }
+          }
+        },
+        "data_lifecycle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "secure_permanent_removal",
+            "transfer_applicable",
+            "secure_transfer"
+          ],
+          "properties": {
+            "secure_permanent_removal": {
+              "type": "boolean"
+            },
+            "transfer_applicable": {
+              "const": true
+            },
+            "secure_transfer": {
+              "const": false
+            }
+          }
+        }
+      }
+    },
+    "envelope_monitoring_lifecycle_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "category",
+        "attested_via",
+        "payload"
+      ],
+      "properties": {
+        "schema": {
+          "const": "seetrex.attestation.v2"
+        },
+        "category": {
+          "const": "monitoring_lifecycle_report"
+        },
+        "attested_via": {
+          "const": "reader+person"
+        },
+        "payload": {
+          "$ref": "#/$defs/payload_monitoring_lifecycle_report"
+        }
+      }
+    },
+    "model_fields_monitoring_lifecycle_report": {
+      "enum": [
+        "activity_monitoring.recording_enabled",
+        "activity_monitoring.covers_data_services_functions_access",
+        "activity_monitoring.user_opt_out_mechanism",
+        "data_lifecycle.secure_permanent_removal"
+      ]
+    },
+    "payload_secure_config_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "secure_configuration",
+        "security_updates_capability"
+      ],
+      "properties": {
+        "secure_configuration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "secure_by_default",
+            "tailor_made_agreement",
+            "reset_to_original_supported"
+          ],
+          "properties": {
+            "secure_by_default": {
+              "type": "boolean"
+            },
+            "tailor_made_agreement": {
+              "const": false
+            },
+            "reset_to_original_supported": {
+              "type": "boolean"
+            }
+          }
+        },
+        "security_updates_capability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "updates_mechanism",
+            "auto_updates"
+          ],
+          "properties": {
+            "updates_mechanism": {
+              "type": "boolean"
+            },
+            "auto_updates": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "applicability_assessed",
+                "applicable",
+                "installed_within_appropriate_timeframe",
+                "default_enabled",
+                "opt_out_mechanism",
+                "user_notification",
+                "postpone_option"
+              ],
+              "properties": {
+                "applicability_assessed": {
+                  "const": true
+                },
+                "applicable": {
+                  "const": true
+                },
+                "installed_within_appropriate_timeframe": {
+                  "const": false
+                },
+                "default_enabled": {
+                  "const": false
+                },
+                "opt_out_mechanism": {
+                  "const": false
+                },
+                "user_notification": {
+                  "const": false
+                },
+                "postpone_option": {
+                  "const": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "envelope_secure_config_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "category",
+        "attested_via",
+        "payload"
+      ],
+      "properties": {
+        "schema": {
+          "const": "seetrex.attestation.v2"
+        },
+        "category": {
+          "const": "secure_config_report"
+        },
+        "attested_via": {
+          "const": "reader+person"
+        },
+        "payload": {
+          "$ref": "#/$defs/payload_secure_config_report"
+        }
+      }
+    },
+    "model_fields_secure_config_report": {
+      "enum": [
+        "secure_configuration.secure_by_default",
+        "secure_configuration.reset_to_original_supported",
+        "security_updates_capability.updates_mechanism"
+      ]
+    },
+    "payload_secure_design_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "risk_based_design",
+        "attack_surface",
+        "exploitation_mitigation"
+      ],
+      "properties": {
+        "risk_based_design": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "process_applied",
+            "risk_assessment_documented"
+          ],
+          "properties": {
+            "process_applied": {
+              "type": "boolean"
+            },
+            "risk_assessment_documented": {
+              "type": "boolean"
+            }
+          }
+        },
+        "attack_surface": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "limited",
+            "external_interfaces_covered"
+          ],
+          "properties": {
+            "limited": {
+              "type": "boolean"
+            },
+            "external_interfaces_covered": {
+              "type": "boolean"
+            }
+          }
+        },
+        "exploitation_mitigation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mechanisms_in_place"
+          ],
+          "properties": {
+            "mechanisms_in_place": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "envelope_secure_design_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "category",
+        "attested_via",
+        "payload"
+      ],
+      "properties": {
+        "schema": {
+          "const": "seetrex.attestation.v2"
+        },
+        "category": {
+          "const": "secure_design_report"
+        },
+        "attested_via": {
+          "const": "reader+person"
+        },
+        "payload": {
+          "$ref": "#/$defs/payload_secure_design_report"
+        }
+      }
+    },
+    "model_fields_secure_design_report": {
+      "enum": [
+        "risk_based_design.process_applied",
+        "risk_based_design.risk_assessment_documented",
+        "attack_surface.limited",
+        "attack_surface.external_interfaces_covered",
+        "exploitation_mitigation.mechanisms_in_place"
+      ]
+    },
+    "payload_security_testing_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "security_testing",
+        "update_distribution"
+      ],
+      "properties": {
+        "security_testing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tests_applied",
+            "reviews_applied",
+            "regular_cadence_defined"
+          ],
+          "properties": {
+            "tests_applied": {
+              "type": "boolean"
+            },
+            "reviews_applied": {
+              "type": "boolean"
+            },
+            "regular_cadence_defined": {
+              "type": "boolean"
+            }
+          }
+        },
+        "update_distribution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "secure_mechanisms_in_place",
+            "timely_remediation_ensured",
+            "automatic_distribution"
+          ],
+          "properties": {
+            "secure_mechanisms_in_place": {
+              "type": "boolean"
+            },
+            "timely_remediation_ensured": {
+              "type": "boolean"
+            },
+            "automatic_distribution": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "applicability_assessed",
+                "applicable",
+                "automatic_manner_provided"
+              ],
+              "properties": {
+                "applicability_assessed": {
+                  "const": true
+                },
+                "applicable": {
+                  "const": true
+                },
+                "automatic_manner_provided": {
+                  "const": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "envelope_security_testing_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "category",
+        "attested_via",
+        "payload"
+      ],
+      "properties": {
+        "schema": {
+          "const": "seetrex.attestation.v2"
+        },
+        "category": {
+          "const": "security_testing_report"
+        },
+        "attested_via": {
+          "const": "reader+person"
+        },
+        "payload": {
+          "$ref": "#/$defs/payload_security_testing_report"
+        }
+      }
+    },
+    "model_fields_security_testing_report": {
+      "enum": [
+        "security_testing.reviews_applied",
+        "update_distribution.timely_remediation_ensured"
+      ]
+    },
+    "payload_third_party_components_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "due_diligence",
+        "component_vulnerabilities"
+      ],
+      "properties": {
+        "due_diligence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "process_documented",
+            "applies_to_open_source"
+          ],
+          "properties": {
+            "process_documented": {
+              "type": "boolean"
+            },
+            "applies_to_open_source": {
+              "type": "boolean"
+            }
+          }
+        },
+        "component_vulnerabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "upstream_reporting_defined",
+            "remediation_per_annex1_part2",
+            "fix_sharing_commitment"
+          ],
+          "properties": {
+            "upstream_reporting_defined": {
+              "type": "boolean"
+            },
+            "remediation_per_annex1_part2": {
+              "type": "boolean"
+            },
+            "fix_sharing_commitment": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "envelope_third_party_components_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "category",
+        "attested_via",
+        "payload"
+      ],
+      "properties": {
+        "schema": {
+          "const": "seetrex.attestation.v2"
+        },
+        "category": {
+          "const": "third_party_components_report"
+        },
+        "attested_via": {
+          "const": "reader+person"
+        },
+        "payload": {
+          "$ref": "#/$defs/payload_third_party_components_report"
+        }
+      }
+    },
+    "model_fields_third_party_components_report": {
+      "enum": [
+        "due_diligence.process_documented",
+        "component_vulnerabilities.upstream_reporting_defined",
+        "component_vulnerabilities.remediation_per_annex1_part2",
+        "component_vulnerabilities.fix_sharing_commitment"
+      ]
+    },
+    "payload_user_information_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manufacturer_identification",
+        "security_information",
+        "conformity_and_support",
+        "user_instructions"
+      ],
+      "properties": {
+        "manufacturer_identification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "identity_and_contact_provided",
+            "product_unique_identification"
+          ],
+          "properties": {
+            "identity_and_contact_provided": {
+              "type": "boolean"
+            },
+            "product_unique_identification": {
+              "type": "boolean"
+            }
+          }
+        },
+        "security_information": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "vulnerability_contact_point",
+            "cvd_policy_location_published",
+            "intended_purpose_and_security_properties",
+            "foreseeable_misuse_risks_documented"
+          ],
+          "properties": {
+            "vulnerability_contact_point": {
+              "type": "boolean"
+            },
+            "cvd_policy_location_published": {
+              "type": "boolean"
+            },
+            "intended_purpose_and_security_properties": {
+              "type": "boolean"
+            },
+            "foreseeable_misuse_risks_documented": {
+              "type": "boolean"
+            }
+          }
+        },
+        "conformity_and_support": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "doc_address_applicable",
+            "doc_internet_address_provided",
+            "support_type_and_end_date_published",
+            "support_period_consistent_with_policy"
+          ],
+          "properties": {
+            "doc_address_applicable": {
+              "const": true
+            },
+            "doc_internet_address_provided": {
+              "const": false
+            },
+            "support_type_and_end_date_published": {
+              "type": "boolean"
+            },
+            "support_period_consistent_with_policy": {
+              "const": false
+            }
+          }
+        },
+        "user_instructions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "commissioning_secure_use",
+            "security_impact_of_changes",
+            "update_installation",
+            "secure_decommissioning_data_removal",
+            "auto_update_optout_instructions",
+            "integration_applicable",
+            "integrator_information_provided",
+            "sbom_disclosure_decided",
+            "sbom_location_provided"
+          ],
+          "properties": {
+            "commissioning_secure_use": {
+              "type": "boolean"
+            },
+            "security_impact_of_changes": {
+              "type": "boolean"
+            },
+            "update_installation": {
+              "type": "boolean"
+            },
+            "secure_decommissioning_data_removal": {
+              "type": "boolean"
+            },
+            "auto_update_optout_instructions": {
+              "type": "boolean"
+            },
+            "integration_applicable": {
+              "const": true
+            },
+            "integrator_information_provided": {
+              "const": false
+            },
+            "sbom_disclosure_decided": {
+              "const": true
+            },
+            "sbom_location_provided": {
+              "const": false
+            }
+          }
+        }
+      }
+    },
+    "envelope_user_information_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "category",
+        "attested_via",
+        "payload"
+      ],
+      "properties": {
+        "schema": {
+          "const": "seetrex.attestation.v2"
+        },
+        "category": {
+          "const": "user_information_report"
+        },
+        "attested_via": {
+          "const": "reader+person"
+        },
+        "payload": {
+          "$ref": "#/$defs/payload_user_information_report"
+        }
+      }
+    },
+    "model_fields_user_information_report": {
+      "enum": [
+        "manufacturer_identification.identity_and_contact_provided",
+        "manufacturer_identification.product_unique_identification",
+        "security_information.cvd_policy_location_published",
+        "security_information.intended_purpose_and_security_properties",
+        "security_information.foreseeable_misuse_risks_documented",
+        "conformity_and_support.support_type_and_end_date_published",
+        "user_instructions.commissioning_secure_use",
+        "user_instructions.security_impact_of_changes",
+        "user_instructions.update_installation",
+        "user_instructions.secure_decommissioning_data_removal",
+        "user_instructions.auto_update_optout_instructions"
+      ]
+    },
+    "detector_fields_third_party_components_report": {
+      "enum": [
+        "due_diligence.applies_to_open_source"
+      ]
+    },
+    "detector_fields_cvd_disclosure_report": {
+      "enum": [
+        "cvd_policy.in_place",
+        "vulnerability_information_sharing.reporting_contact_address_provided"
+      ]
+    },
+    "detector_fields_security_testing_report": {
+      "enum": [
+        "security_testing.tests_applied",
+        "security_testing.regular_cadence_defined",
+        "update_distribution.secure_mechanisms_in_place"
+      ]
+    },
+    "detector_fields_user_information_report": {
+      "enum": [
+        "security_information.vulnerability_contact_point"
+      ]
+    },
+    "model_document_path": {
+      "description": "Closed list of exact names the model may read: text documents only, no globs, never source code, workflows, dependabot.yml, lockfiles or CHANGELOG.md (those are read by the detectors, in the runner). Lowercase security.md is not listed: GitHub recognises SECURITY.md; whether it also recognises the lowercase name is not verified.",
+      "enum": [
+        "README.md",
+        "SECURITY.md",
+        ".github/SECURITY.md",
+        "docs/SECURITY.md",
+        "PRIVACY.md",
+        "CONTRIBUTING.md",
+        ".github/CONTRIBUTING.md",
+        "docs/CONTRIBUTING.md",
+        "SUPPORT.md",
+        ".github/SUPPORT.md",
+        "docs/SUPPORT.md",
+        "THREAT_MODEL.md",
+        ".github/THREAT_MODEL.md",
+        "docs/THREAT_MODEL.md",
+        "docs/threat-model.md",
+        "docs/DEPENDENCIES.md"
+      ]
+    },
+    "model_line_citation": {
+      "description": "A line citation of a layer-M field: the model may only cite a document it was given, so path is one of the closed list of model documents.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "field",
+        "value",
+        "path",
+        "line_start",
+        "line_end",
+        "quote_sha256"
+      ],
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/field_name"
+        },
+        "value": {
+          "const": true
+        },
+        "path": {
+          "$ref": "#/$defs/model_document_path"
+        },
+        "line_start": {
+          "$ref": "#/$defs/line"
+        },
+        "line_end": {
+          "$ref": "#/$defs/line"
+        },
+        "quote_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

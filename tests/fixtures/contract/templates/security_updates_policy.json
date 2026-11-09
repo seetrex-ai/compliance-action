@@ -1,0 +1,20 @@
+{
+  "schema": "seetrex.attestation.v2",
+  "category": "security_updates_policy",
+  "attested_via": "person",
+  "payload": {
+    "policy": {
+      "product_placed_on_market_at": "1970-01-01",
+      "support_period_end_at": "1970-01-02",
+      "expected_use_less_than_5y": false,
+      "updates_free_of_charge": false,
+      "updates_disseminated_without_delay": false,
+      "advisory_messages_provided": false,
+      "updates_retention_years": 0.0,
+      "separation_from_functionality": {
+        "technically_feasible": false,
+        "provided_separately": false
+      }
+    }
+  }
+}

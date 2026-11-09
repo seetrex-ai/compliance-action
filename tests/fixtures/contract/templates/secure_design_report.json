@@ -1,0 +1,18 @@
+{
+  "schema": "seetrex.attestation.v2",
+  "category": "secure_design_report",
+  "attested_via": "person",
+  "payload": {
+    "risk_based_design": {
+      "process_applied": false,
+      "risk_assessment_documented": false
+    },
+    "attack_surface": {
+      "limited": false,
+      "external_interfaces_covered": false
+    },
+    "exploitation_mitigation": {
+      "mechanisms_in_place": false
+    }
+  }
+}
