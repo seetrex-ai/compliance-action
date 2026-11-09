@@ -223,7 +223,9 @@ if [ "$WITH_MODEL" = true ]; then
       printf -- '- %s: left out (%s bytes, over the 64 KiB cap)\n' "$d" "$b"
       continue
     fi
-    verdict="$(perl "$BIN_DIR/doccheck.pl" "$f" 2> /dev/null)" \
+    # Never with an inherited PERL5OPT (-M), PERL5LIB / PERLLIB (a strict.pm
+    # of the workflow's own) or PERL5DB: the verdict is doccheck.pl's alone.
+    verdict="$(env -u PERL5OPT -u PERL5LIB -u PERLLIB -u PERL5DB perl "$BIN_DIR/doccheck.pl" "$f" 2> /dev/null)" \
       || fail "A document could not be checked: no proposal was requested."
     verdict="${verdict%$'\r'}"
     case "$verdict" in
