@@ -684,9 +684,16 @@ test_intent_propose_request_follows_the_contract() {
   # EXPIRES IF: the contract changes version.
   local body push sha start_keys
   _live_case
+  # The SBOM carries an `application` component next to the library, nested
+  # under it: scanned_packages counts the library only.
+  jq '.components[0].components = [{"bom-ref": "fixture-app", type: "application", name: "fixture-app"}]' \
+    "$FIXTURES_COMMON/sbom.cdx.json" > "$CASE_DIR/sbom-app.json"
+  set_trivy_fixture cyclonedx "$CASE_DIR/sbom-app.json"
   _queue_done
   run_action propose=true propose-with-model=true
   assert_rc 0
+  assert_json "$(curl_call_dir 3)/body" '[.sbom | fromjson | .components | .. | objects | select(has("bom-ref")) | .type] | sort == ["application", "library"]' \
+    "the push sent the SBOM with an application and a library"
   body="$(_first_propose_body)"
   assert_eq '[]' "$(_validate propose-request '' "$body")" "the start request is valid against the contract"
   start_keys="$(jq -c '."$defs".start.properties | keys' "$CONTRACT_FIXTURES/propose-request.schema.json" | tr -d '\r')"
@@ -951,16 +958,23 @@ test_intent_credential_filter_ports_the_reader_patterns() {
   # pattern, by name, on a case each, including assignments whose name
   # starts with a word and `_` (DB_PASSWORD, AWS_SECRET_ACCESS_KEY), bare
   # token/secret keys, and the placeholder rule (${NAME}, $NAME in capitals,
-  # <...> are not secrets; $Lowercase is). The expected verdicts were
-  # measured against filters.py with the same texts.
+  # <...> are not secrets; $Lowercase is), and Python's semantics where Perl
+  # differs: 0x1C..0x1F are \s, and (?i) makes [A-Za-z] of the token value
+  # match U+017F. The expected verdicts were measured against filters.py
+  # with the same texts.
   # CONTEXT: R4-4 review round 1 (the runner's list was shorter than the
-  # reader's).
+  # reader's) and round 2 (\x1f, \x1c and U+017F passed doccheck.pl and not
+  # filters.py).
   # EXPIRES IF: filters.py changes its list (then the cases change with it).
   local name want text got names
   while IFS=$'\t' read -r name want text; do
     case "$name" in '#'* | '') continue ;; esac
     text="${text%$'\r'}"
-    printf '%s' "${text//@@/}" > "$TEST_TMP/case.txt"
+    text="${text//@@/}"
+    text="${text//@FS@/$'\x1c'}"
+    text="${text//@RS@/$'\x1e'}"
+    text="${text//@US@/$'\x1f'}"
+    printf '%s' "$text" > "$TEST_TMP/case.txt"
     got="$(perl "$ACTION_ROOT/bin/doccheck.pl" "$TEST_TMP/case.txt" | tr -d '\r')"
     if [ "$want" = ok ]; then
       assert_eq ok "$got" "case $name"
@@ -1012,4 +1026,191 @@ test_intent_line_hash_handles_crlf_ranges() {
   assert_eq "$(cat "$lf/SECURITY.md")" "$(tr -d '\r' < "$crlf/SECURITY.md")" "the copy differs only by \\r"
   assert_eq "$(cat "$TEST_TMP/lf.json")" "$(cat "$TEST_TMP/crlf.json")" "CRLF and LF trees give the same facts"
   assert_json "$TEST_TMP/crlf.json" '.facts | length == 10' "the ten facts"
+}
+
+test_intent_detector_citation_backs_only_its_targets() {
+  # INTENT: a layer-D citation is kept only when the fact it names (same
+  # path, lines and hash) comes from a detector whose targets name that
+  # field of that category (detector_targets of the runtime contract, from
+  # DetectorId::targets()): the CODEOWNERS hint never sets cvd_policy.in_place,
+  # reporting_contact_address_provided or applies_to_open_source, the
+  # security policy heading never sets applies_to_open_source; the policy
+  # heading for cvd_policy.in_place and the contact line for the contact
+  # field are kept.
+  # CONTEXT: R4-4 review round 2 (any fact sent backed any layer-D field:
+  # measured with codeowners_file on the three fields).
+  # EXPIRES IF: the contract lets a hint set a field.
+  local art t="$FIXTURES_PROPOSE/tree" co s3 s5
+  co="$(_lines_sha "$t/CODEOWNERS" 1 1)"
+  s3="$(_lines_sha "$t/SECURITY.md" 3 3)"
+  s5="$(_lines_sha "$t/SECURITY.md" 5 5)"
+  _live_case
+  art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
+  jq -n --arg co "$co" --arg s5 "$s5" '
+    def c($f; $p; $a; $b; $h): {field: $f, value: true, path: $p, line_start: $a, line_end: $b, quote_sha256: $h};
+    {version: 1, status: "done", proposals: {
+      third_party_components_report: {state: "ready", citations: [
+        c("due_diligence.applies_to_open_source"; "CODEOWNERS"; 1; 1; $co)]},
+      cvd_disclosure_report: {state: "ready", citations: [
+        c("cvd_policy.in_place"; "CODEOWNERS"; 1; 1; $co),
+        c("vulnerability_information_sharing.reporting_contact_address_provided"; "SECURITY.md"; 5; 5; $s5)]}}}' \
+    > "$CASE_DIR/done.json"
+  set_api_response 200 "$CASE_DIR/done.json"
+  run_action propose=true
+  assert_rc 0
+  assert_json "$art/cvd_disclosure_report.json" \
+    '.payload.cvd_policy.in_place == false and .payload.vulnerability_information_sharing.reporting_contact_address_provided == true' \
+    "cvd: the CODEOWNERS fact does not back cvd_policy.in_place, the contact line backs the contact"
+  assert_no_file "$art/third_party_components_report.json" "tpc: the CODEOWNERS fact does not back applies_to_open_source"
+  assert_line_eq "$RUN_STDOUT" "Seetrex proposed attestations for review: 1 citations kept, 2 dropped (not verified against this commit), 2 files in the seetrex-proposals artifact." \
+    "run 1: one kept, two dropped"
+
+  _live_case
+  art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
+  jq -n --arg co "$co" --arg s3 "$s3" '
+    def c($f; $p; $a; $b; $h): {field: $f, value: true, path: $p, line_start: $a, line_end: $b, quote_sha256: $h};
+    {version: 1, status: "done", proposals: {
+      third_party_components_report: {state: "ready", citations: [
+        c("due_diligence.applies_to_open_source"; "SECURITY.md"; 3; 3; $s3)]},
+      cvd_disclosure_report: {state: "ready", citations: [
+        c("cvd_policy.in_place"; "SECURITY.md"; 3; 3; $s3),
+        c("vulnerability_information_sharing.reporting_contact_address_provided"; "CODEOWNERS"; 1; 1; $co)]}}}' \
+    > "$CASE_DIR/done.json"
+  set_api_response 200 "$CASE_DIR/done.json"
+  run_action propose=true
+  assert_rc 0
+  assert_json "$art/cvd_disclosure_report.json" \
+    '.payload.cvd_policy.in_place == true and .payload.vulnerability_information_sharing.reporting_contact_address_provided == false' \
+    "cvd: the policy heading backs cvd_policy.in_place, the CODEOWNERS fact not the contact"
+  assert_no_file "$art/third_party_components_report.json" "tpc: the policy heading does not back applies_to_open_source"
+  assert_line_eq "$RUN_STDOUT" "Seetrex proposed attestations for review: 1 citations kept, 2 dropped (not verified against this commit), 2 files in the seetrex-proposals artifact." \
+    "run 2: one kept, two dropped"
+}
+
+test_intent_document_check_failure_requests_nothing() {
+  # INTENT: when the credential check of a document cannot run (perl exits
+  # non-zero, here a perl of the PATH that exits 127), the proposal step
+  # fails closed: the warning "A document could not be checked" and no call
+  # to the propose route; the push is recorded as always.
+  # CONTEXT: R4-4 review round 2 (the fail-closed branch had no test).
+  # EXPIRES IF: the credential check leaves perl.
+  local old_path="$PATH"
+  _live_case
+  mkdir -p "$CASE_DIR/fakebin"
+  printf '#!/bin/sh\nprintf x >> "%s"\nexit 127\n' "$CASE_DIR/perl.calls" > "$CASE_DIR/fakebin/perl"
+  chmod +x "$CASE_DIR/fakebin/perl"
+  _queue_done
+  export PATH="$CASE_DIR/fakebin:$PATH"
+  run_action propose=true propose-with-model=true
+  export PATH="$old_path"
+  assert_rc 0
+  assert_file_exists "$CASE_DIR/perl.calls" "the fake perl was the one called"
+  assert_line_eq "$RUN_STDOUT" "::warning::A document could not be checked: no proposal was requested." "the warning"
+  assert_eq 0 "$(_propose_call_count)" "no call to the propose route"
+  _assert_record_kept "a check that cannot run"
+}
+
+test_intent_document_check_ignores_inherited_perl_environment() {
+  # INTENT: the credential check runs perl without PERL5OPT, PERL5LIB,
+  # PERLLIB or PERL5DB from the job's environment: a strict.pm of the
+  # workflow's own (through any of them) or a debugger hook cannot answer
+  # "ok" for a document with a private key; the document is still left out.
+  # CONTEXT: R4-4 review round 2 (perl inherited them).
+  # EXPIRES IF: the credential check leaves perl.
+  local evil variant
+  for variant in PERL5LIB PERLLIB PERL5OPT PERL5DB; do
+    setup_case
+    _commit_tree "$FIXTURES_PROPOSE/tree"
+    commit_file "$FIXTURES_PROPOSE/key-SECURITY.md" SECURITY.md
+    make_event private
+    set_api_response 200 "$FIXTURES_PROPOSE/push-200.json"
+    evil="$CASE_DIR/evil"
+    mkdir -p "$evil"
+    printf 'package strict;\nprint "ok\\n";\nexit 0;\n1;\n' > "$evil/strict.pm"
+    (
+      case "$variant" in
+        PERL5LIB) export PERL5LIB="$evil" ;;
+        PERLLIB) export PERLLIB="$evil" ;;
+        PERL5OPT) export PERL5OPT="-I$evil" ;;
+        PERL5DB) export PERL5OPT=-d PERL5DB='BEGIN { print "ok\n"; exit 0 }' ;;
+      esac
+      run_action dry-run=true propose=true propose-with-model=true
+      printf '%s\n' "$RUN_RC" > "$CASE_DIR/rc"
+    )
+    RUN_RC="$(cat "$CASE_DIR/rc")"
+    assert_rc 0
+    assert_line_eq "$RUN_STDOUT" "- SECURITY.md: left out (a line looks like a credential: private_key_block)" \
+      "$variant: the key document is still left out"
+  done
+}
+
+test_intent_citation_checks_each_bite() {
+  # INTENT: each check of a line citation stands on its own: a layer-M
+  # citation past the end of a sent document (line 400) whose quote_sha256
+  # is the hash of nothing, a reversed range (5-3) with that same hash, a
+  # layer-M citation and a layer-D citation that carry `source: vuln_scan`
+  # are all dropped, while a valid citation of the same answer is kept.
+  # CONTEXT: R4-4 review round 2 (the end-of-file and range-order checks and
+  # the `source` of a line citation could be removed without a red test).
+  # EXPIRES IF: the contract changes the citation shapes.
+  local art t="$FIXTURES_PROPOSE/tree" empty
+  empty="$(printf '' | sha256sum)"
+  empty="${empty%% *}"
+  _live_case
+  art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
+  jq -n --arg e "$empty" --arg c4 "$(_lines_sha "$t/CONTRIBUTING.md" 4 4)" --arg s3 "$(_lines_sha "$t/SECURITY.md" 3 3)" '
+    def c($f; $p; $a; $b; $h): {field: $f, value: true, path: $p, line_start: $a, line_end: $b, quote_sha256: $h};
+    {version: 1, status: "done", proposals: {
+      third_party_components_report: {state: "ready", citations: [
+        c("component_vulnerabilities.fix_sharing_commitment"; "CONTRIBUTING.md"; 4; 4; $c4),
+        c("due_diligence.process_documented"; "CONTRIBUTING.md"; 5; 3; $e)]},
+      cvd_disclosure_report: {state: "ready", citations: [
+        c("vulnerability_information_sharing.measures_in_place"; "SECURITY.md"; 400; 400; $e),
+        (c("cvd_policy.enforced"; "SECURITY.md"; 3; 3; $s3) + {source: "vuln_scan"}),
+        (c("cvd_policy.in_place"; "SECURITY.md"; 3; 3; $s3) + {source: "vuln_scan"})]}}}' \
+    > "$CASE_DIR/done.json"
+  set_api_response 200 "$CASE_DIR/done.json"
+  run_action propose=true propose-with-model=true
+  assert_rc 0
+  assert_json "$art/third_party_components_report.json" \
+    '.payload.component_vulnerabilities.fix_sharing_commitment == true and .payload.due_diligence.process_documented == false' \
+    "tpc: the valid citation kept, the reversed range dropped"
+  assert_no_file "$art/cvd_disclosure_report.json" "cvd: past the end, M with source, D with source: all dropped, nothing found"
+  assert_line_eq "$RUN_STDOUT" "Seetrex proposed attestations for review: 1 citations kept, 4 dropped (not verified against this commit), 2 files in the seetrex-proposals artifact." \
+    "one kept, four dropped"
+}
+
+test_intent_scan_citation_needs_a_scanned_package() {
+  # INTENT: the scanner-backed true of monitoring_lifecycle_report needs at
+  # least one scanned package: an SBOM without `library` components (an
+  # application only) gives scanned_packages 0, and a scan citation that
+  # carries exactly the values sent (0 findings, 0 packages, the hash) is
+  # still dropped.
+  # CONTEXT: plan R4 section 1 (zero findings over nothing scanned proves
+  # nothing) and R4-4 review round 2 (the >= 1 check had no test).
+  # EXPIRES IF: the scanner field leaves the contract.
+  local art sha
+  setup_case
+  _commit_tree "$FIXTURES_PROPOSE/tree"
+  set_trivy_fixture json "$FIXTURES_PROPOSE/trivy-clean.json"
+  jq '.components = [{"bom-ref": "fixture-app", type: "application", name: "fixture-app"}] | .dependencies = []' \
+    "$FIXTURES_COMMON/sbom.cdx.json" > "$CASE_DIR/sbom-nolib.json"
+  set_trivy_fixture cyclonedx "$CASE_DIR/sbom-nolib.json"
+  _push_with_mlr "$CASE_DIR/push.json"
+  art="$RUNNER_TEMP/seetrex-out/seetrex-proposals"
+  run_action dry-run=true propose=true
+  assert_rc 0
+  sha="$(sed -n 's/^Scan of the push: 0 findings over 0 packages, report sha256 \([0-9a-f]\{64\}\)\r\{0,1\}$/\1/p' "$RUN_STDOUT")"
+  assert_ne "" "$sha" "the clean scan over no library: 0 findings over 0 packages"
+  reset_logs
+  set_api_response 200 "$CASE_DIR/push.json"
+  _mlr_response "$CASE_DIR/done.json" 0 0 "$sha"
+  set_api_response 200 "$CASE_DIR/done.json"
+  run_action propose=true
+  assert_rc 0
+  assert_json "$(_first_propose_body)" ".start.scan == {finding_count: 0, scanned_packages: 0, report_sha256: \"$sha\"}" \
+    "the request carries the scan the citation repeats"
+  assert_no_file "$art/monitoring_lifecycle_report.json.pending" "0 packages: dropped"
+  assert_line_eq "$RUN_STDOUT" "Seetrex proposed attestations for review: 0 citations kept, 1 dropped (not verified against this commit), 0 files in the seetrex-proposals artifact." \
+    "counted as dropped"
 }
