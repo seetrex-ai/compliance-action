@@ -65,7 +65,7 @@ catalogue said about it.
 The obligations that read an attestation stay `not_documented` until you
 write its file by hand. Two inputs, both `false` by default, add an automatic
 reader with citation that proposes those files for you to review. They come
-with `v1.1.0`, which is not released yet; `v1.0.0` has neither.
+with `v1.1.0`; `v1.0.0` has neither.
 
 - `propose: true`: after the push, deterministic detectors run in your runner
   over the pushed commit (the same tree that is scanned) and look for facts: a
@@ -151,7 +151,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with: { persist-credentials: false }
-      - uses: seetrex-ai/compliance-action@20dc0d2d4877be42203a9b2835486d0bab863b8d # v1.0.0
+      - uses: seetrex-ai/compliance-action@a9f6625e6faa5dd4dc50a36e398655b78b9c5dea # v1.1.0
 ```
 
 ## What leaves your repository
