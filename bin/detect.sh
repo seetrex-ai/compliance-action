@@ -309,7 +309,7 @@ first_step() {
 # ------------------------------------------------------------- workflows
 shopt -s nullglob
 for wf in "$TREE"/.github/workflows/*.yml "$TREE"/.github/workflows/*.yaml; do
-  [ -f "$wf" ] && [ ! -L "$wf" ] || continue
+  if [ ! -f "$wf" ] || [ -L "$wf" ]; then continue; fi
   rel="${wf#"$TREE/"}"
   steps_of "$wf" > "$WORK/steps.tsv"
   # The Action's own workflow is never evidence.

@@ -1,4 +1,5 @@
 # shellcheck shell=bash
+# shellcheck disable=SC2016  # literal backticks and $ in expected Markdown and jq text throughout
 # Dynamic tests of the proposal step (bin/propose.sh through bin/run.sh,
 # plan R4 section 2, amendment #334): the opt-in, the dry run, the job log,
 # what leaves the runner, the closed list of documents, the rehydration of
@@ -331,7 +332,7 @@ test_intent_model_list_is_fixed_names_only() {
   # CONTEXT: reader contract 1 (model_document_path); amendment #334 (text
   # documents of fixed name, never code).
   # EXPIRES IF: the contract changes its list (then this one changes with it).
-  local body p list_line
+  local body p
   _live_case
   printf 'docs: content\n' > "$CASE_DIR/f"
   commit_file "$CASE_DIR/f" README.md.bak
@@ -999,6 +1000,7 @@ test_intent_line_hash_handles_crlf_ranges() {
   # would hide a missing sub(/\r$/, ""): BINMODE=3 makes it read the bytes as
   # Linux awk does (BINMODE means nothing there). Measured: without it, the
   # mutant that removes the sub() survived on Windows.
+  # shellcheck disable=SC2317  # called by the sourced function bodies below
   awk() { command awk -v BINMODE=3 "$@"; }
   want="$(printf 'two\nthree' | sha256sum)"
   want="${want%% *}"

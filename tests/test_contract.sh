@@ -1,4 +1,5 @@
 # shellcheck shell=bash
+# shellcheck disable=SC2016  # literal $ and backticks in expected jq and Markdown text
 # Tests of the copy of reader contract 1 the Action speaks
 # (tests/fixtures/contract, from the Seetrex repository; README.md there says
 # from which commit) and of bin/contract/reader-contract-1.json, the part of

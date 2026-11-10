@@ -440,7 +440,7 @@ while [ "$HTTP" = 202 ] && [ "$status" = pending ]; do
   post_body "$P/poll.json"
   status="$(resp_status)"
 done
-if ! { [ "$HTTP" = 200 ] && [ "$status" = done ]; }; then
+if ! { [ "$HTTP" = 200 ] && [ "$status" = "done" ]; }; then
   propose_failure
 fi
 jq -e '(.proposals | type) == "object"' "$P/resp" > /dev/null 2>&1 || propose_failure
