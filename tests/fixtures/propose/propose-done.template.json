@@ -1,0 +1,190 @@
+{
+  "version": 1,
+  "status": "done",
+  "proposals": {
+    "third_party_components_report": {
+      "state": "ready",
+      "envelope": {
+        "schema": "seetrex.attestation.v2",
+        "category": "third_party_components_report",
+        "attested_via": "reader+person",
+        "payload": {
+          "due_diligence": {
+            "process_documented": true,
+            "applies_to_open_source": true,
+            "injected` key\n# heading": true
+          },
+          "component_vulnerabilities": {
+            "upstream_reporting_defined": false,
+            "remediation_per_annex1_part2": false,
+            "fix_sharing_commitment": true
+          }
+        }
+      },
+      "citations": [
+        {
+          "field": "due_diligence.process_documented",
+          "value": true,
+          "path": "CONTRIBUTING.md",
+          "line_start": 3,
+          "line_end": 3,
+          "quote_sha256": "@SHA_CONTRIB3@"
+        },
+        {
+          "field": "due_diligence.applies_to_open_source",
+          "value": true,
+          "path": ".github/dependabot.yml",
+          "line_start": 3,
+          "line_end": 3,
+          "quote_sha256": "@SHA_DEPENDABOT3@"
+        }
+      ]
+    },
+    "cvd_disclosure_report": {
+      "state": "ready",
+      "envelope": {
+        "schema": "seetrex.attestation.v2",
+        "category": "cvd_disclosure_report",
+        "attested_via": "reader+person",
+        "payload": {
+          "cvd_policy": {
+            "in_place": true,
+            "enforced": false,
+            "publicly_available": false
+          },
+          "vulnerability_information_sharing": {
+            "measures_in_place": true,
+            "reporting_contact_address_provided": true
+          },
+          "fixed_vulnerability_disclosure": {
+            "practice_in_place": false,
+            "delay_exception_invoked": false,
+            "content": {
+              "description_included": false,
+              "affected_product_identification": false,
+              "impacts_included": false,
+              "severity_included": false,
+              "remediation_information": false
+            }
+          }
+        }
+      },
+      "citations": [
+        {
+          "field": "cvd_policy.in_place",
+          "value": true,
+          "path": "SECURITY.md",
+          "line_start": 3,
+          "line_end": 3,
+          "quote_sha256": "@SHA_SEC3@"
+        },
+        {
+          "field": "vulnerability_information_sharing.reporting_contact_address_provided",
+          "value": true,
+          "path": "SECURITY.md",
+          "line_start": 5,
+          "line_end": 5,
+          "quote_sha256": "@SHA_SEC5@"
+        },
+        {
+          "field": "vulnerability_information_sharing.measures_in_place",
+          "value": true,
+          "path": "SECURITY.md",
+          "line_start": 5,
+          "line_end": 6,
+          "quote_sha256": "@SHA_SEC5_6@"
+        }
+      ]
+    },
+    "secure_config_report": {
+      "state": "needs_person",
+      "envelope": {
+        "schema": "seetrex.attestation.v2",
+        "category": "secure_config_report",
+        "attested_via": "reader+person",
+        "payload": {
+          "secure_configuration": {
+            "secure_by_default": true,
+            "reset_to_original_supported": false,
+            "tailor_made_agreement": false
+          },
+          "security_updates_capability": {
+            "updates_mechanism": false,
+            "auto_updates": {
+              "applicability_assessed": false,
+              "applicable": false,
+              "installed_within_appropriate_timeframe": false,
+              "default_enabled": false,
+              "opt_out_mechanism": false,
+              "user_notification": false,
+              "postpone_option": false
+            }
+          }
+        }
+      },
+      "citations": [
+        {
+          "field": "secure_configuration.secure_by_default",
+          "value": true,
+          "path": "README.md",
+          "line_start": 3,
+          "line_end": 3,
+          "quote_sha256": "@SHA_README3@"
+        }
+      ],
+      "pending_fields": [
+        "secure_configuration.tailor_made_agreement",
+        "security_updates_capability.auto_updates.applicability_assessed",
+        "security_updates_capability.auto_updates.applicable",
+        "security_updates_capability.auto_updates.installed_within_appropriate_timeframe",
+        "security_updates_capability.auto_updates.default_enabled",
+        "security_updates_capability.auto_updates.opt_out_mechanism",
+        "security_updates_capability.auto_updates.user_notification",
+        "security_updates_capability.auto_updates.postpone_option"
+      ]
+    },
+    "security_updates_policy": {
+      "state": "needs_person",
+      "pending_fields": [
+        "policy.product_placed_on_market_at",
+        "policy.support_period_end_at",
+        "policy.expected_use_less_than_5y",
+        "policy.updates_free_of_charge",
+        "policy.updates_disseminated_without_delay",
+        "policy.advisory_messages_provided",
+        "policy.updates_retention_years",
+        "policy.separation_from_functionality.technically_feasible",
+        "policy.separation_from_functionality.provided_separately"
+      ]
+    },
+    "secure_design_report": {
+      "state": "nothing_found"
+    },
+    "user_information_report": {
+      "state": "needs_person",
+      "envelope": {
+        "schema": "seetrex.attestation.v2",
+        "category": "user_information_report",
+        "attested_via": "reader+person",
+        "payload": {
+          "security_information": {
+            "vulnerability_contact_point": true
+          }
+        }
+      },
+      "citations": [
+        {
+          "field": "security_information.vulnerability_contact_point",
+          "value": true,
+          "path": "SECURITY.md",
+          "line_start": 5,
+          "line_end": 5,
+          "quote_sha256": "@SHA_SEC5@"
+        }
+      ],
+      "pending_fields": [
+        "conformity_and_support.doc_address_applicable"
+      ]
+    }
+  }
+}

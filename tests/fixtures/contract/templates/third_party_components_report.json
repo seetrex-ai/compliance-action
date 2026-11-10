@@ -1,0 +1,16 @@
+{
+  "schema": "seetrex.attestation.v2",
+  "category": "third_party_components_report",
+  "attested_via": "person",
+  "payload": {
+    "due_diligence": {
+      "process_documented": false,
+      "applies_to_open_source": false
+    },
+    "component_vulnerabilities": {
+      "upstream_reporting_defined": false,
+      "remediation_per_annex1_part2": false,
+      "fix_sharing_commitment": false
+    }
+  }
+}

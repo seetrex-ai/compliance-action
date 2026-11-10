@@ -51,6 +51,7 @@ L_TOO_LARGE='The SBOM and attestations do not fit in one request even without th
 L_TRIVY_SHA='The Trivy download does not match its pinned sha256: nothing was scanned or sent.'
 # shellcheck disable=SC2016  # literal backticks
 L_NO_OIDC='The workflow lacks `permissions: id-token: write`: nothing was sent.'
+L_MODEL_NEEDS_PROPOSE='Input propose-with-model needs propose: true as well: nothing was sent.'
 
 WORK=""
 # shellcheck disable=SC2317  # runs from the EXIT trap below
@@ -147,7 +148,10 @@ DRY_RUN="${INPUT_DRY_RUN:-false}"
 STRICT="${INPUT_STRICT:-false}"
 REPIN="${INPUT_REQUEST_REPIN:-false}"
 CLOSE="${INPUT_REQUEST_CLOSE:-false}"
-for pair in "dry-run=$DRY_RUN" "strict=$STRICT" "request-repin=$REPIN" "request-close=$CLOSE"; do
+PROPOSE="${INPUT_PROPOSE:-false}"
+WITH_MODEL="${INPUT_PROPOSE_WITH_MODEL:-false}"
+for pair in "dry-run=$DRY_RUN" "strict=$STRICT" "request-repin=$REPIN" "request-close=$CLOSE" \
+  "propose=$PROPOSE" "propose-with-model=$WITH_MODEL"; do
   case "${pair#*=}" in
     true|false) ;;
     *)
@@ -162,6 +166,9 @@ case "$SUMMARY" in
 esac
 if [ "$REPIN" = true ] && [ "$CLOSE" = true ]; then
   die "request-repin and request-close cannot be used together: nothing was sent."
+fi
+if [ "$WITH_MODEL" = true ] && [ "$PROPOSE" != true ]; then
+  die "$L_MODEL_NEEDS_PROPOSE"
 fi
 
 FILTERS="${GITHUB_ACTION_PATH:-}/bin/filters"
@@ -331,9 +338,27 @@ if [ "$REPIN" = true ] || [ "$CLOSE" = true ]; then
 fi
 
 # ------------------------------------------------------- filters present
-for f in sbom trivy body_check summary_full summary_counters dry_run; do
+for f in sbom trivy body_check summary_full summary_counters dry_run facts summary_proposals; do
   [ -f "$FILTERS/$f.jq" ] || die "The Action is incomplete (bin/filters/$f.jq is missing): nothing was scanned or sent."
 done
+for f in detect propose; do
+  [ -f "${GITHUB_ACTION_PATH:-}/bin/$f.sh" ] || die "The Action is incomplete (bin/$f.sh is missing): nothing was scanned or sent."
+done
+
+# ------------------------------------------------ 20. proposals (opt-in)
+# bin/propose.sh runs in its own process, after the record of the push was
+# handled (or, in a dry run, after the dry-run report): its exit 1 is a
+# warning it already printed, a failed job only with strict, never a lost
+# record. With propose: false nothing of it runs and nothing changes in what
+# leaves the runner.
+final_rc=0
+propose_step() {
+  local rc=0
+  bash "${GITHUB_ACTION_PATH:-}/bin/propose.sh" "$WORK" "$FILTERS" "$OUT_DIR" "$1" "$WITH_MODEL" || rc=$?
+  if [ "$rc" -ne 0 ] && [ "$STRICT" = true ]; then
+    final_rc=1
+  fi
+}
 # Every git call that reads the commit goes through git_commit: replace refs
 # are off (an earlier step could `git replace` the commit, a tree or a blob
 # with another object), and a partial clone never fetches a missing object
@@ -586,8 +611,11 @@ if [ "$DRY_RUN" = true ]; then
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     cat "$WORK/dry.md" >> "$GITHUB_STEP_SUMMARY"
   fi
+  if [ "$PROPOSE" = true ]; then
+    propose_step true
+  fi
   say "Dry run: nothing was sent to Seetrex."
-  exit 0
+  exit "$final_rc"
 fi
 
 # ------------------------------------------------------- 16-17. send
@@ -598,7 +626,6 @@ if ! { [ "$HTTP" = 200 ] && resp_is_json; }; then
 fi
 
 # ------------------------------------------------- 18. the 200 answer
-final_rc=0
 if [ "$left_out" = true ]; then
   say "$L_LEFT_OUT"
 fi
@@ -648,5 +675,8 @@ if [ "$(jq -r '.quota | strings' "$WORK/resp" 2> /dev/null || true)" = reached ]
   if [ "$STRICT" = true ]; then
     final_rc=1
   fi
+fi
+if [ "$PROPOSE" = true ]; then
+  propose_step false
 fi
 exit "$final_rc"

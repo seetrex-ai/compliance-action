@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:seetrex:reader-contract:1:reader-response",
+  "title": "seetrex-reader to compliance-server response (loopback)",
+  "description": "Candidates only: a true with the lines that hold its literal quote. Never text, never the model name (that goes to the reader's log only). A field without a candidate is false, not found. A refusal from the model is an empty candidates object. Rules JSON Schema cannot state: every category and field was in the request's fields_open; every path was among the request's documents; line_end >= line_start; quote_sha256 is the line-range hash of those lines of that document (same rule as line_sha256 in facts.schema.json, over the text received); at most one candidate per field.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "candidates"],
+  "properties": {
+    "version": { "$ref": "#/$defs/version" },
+    "candidates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "availability_resilience_report": { "type": "array", "items": { "$ref": "#/$defs/candidate", "properties": { "field": { "$ref": "#/$defs/model_fields_availability_resilience_report" } } } },
+        "cvd_disclosure_report": { "type": "array", "items": { "$ref": "#/$defs/candidate", "properties": { "field": { "$ref": "#/$defs/model_fields_cvd_disclosure_report" } } } },
+        "data_protection_report": { "type": "array", "items": { "$ref": "#/$defs/candidate", "properties": { "field": { "$ref": "#/$defs/model_fields_data_protection_report" } } } },
+        "monitoring_lifecycle_report": { "type": "array", "items": { "$ref": "#/$defs/candidate", "properties": { "field": { "$ref": "#/$defs/model_fields_monitoring_lifecycle_report" } } } },
+        "secure_config_report": { "type": "array", "items": { "$ref": "#/$defs/candidate", "properties": { "field": { "$ref": "#/$defs/model_fields_secure_config_report" } } } },
+        "secure_design_report": { "type": "array", "items": { "$ref": "#/$defs/candidate", "properties": { "field": { "$ref": "#/$defs/model_fields_secure_design_report" } } } },
+        "security_testing_report": { "type": "array", "items": { "$ref": "#/$defs/candidate", "properties": { "field": { "$ref": "#/$defs/model_fields_security_testing_report" } } } },
+        "third_party_components_report": { "type": "array", "items": { "$ref": "#/$defs/candidate", "properties": { "field": { "$ref": "#/$defs/model_fields_third_party_components_report" } } } },
+        "user_information_report": { "type": "array", "items": { "$ref": "#/$defs/candidate", "properties": { "field": { "$ref": "#/$defs/model_fields_user_information_report" } } } }
+      }
+    }
+  },
+  "$defs": {
+    "version": {
+      "description": "Version of the reader contract. A new version is a new contract: every party moves together.",
+      "const": 1
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "value", "path", "line_start", "line_end", "quote_sha256"],
+      "properties": {
+        "field": { "$ref": "#/$defs/field_name" },
+        "value": { "const": true },
+        "path": { "$ref": "#/$defs/model_document_path" },
+        "line_start": { "$ref": "#/$defs/line" },
+        "line_end": { "$ref": "#/$defs/line" },
+        "quote_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "field_name": {
+      "description": "Dotted path of a leaf of the category's template.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+    },
+    "model_document_path": {
+      "description": "Closed list of exact names the model may read: text documents only, no globs, never source code, workflows, dependabot.yml, lockfiles or CHANGELOG.md (those are read by the detectors, in the runner). Lowercase security.md is not listed: GitHub recognises SECURITY.md; whether it also recognises the lowercase name is not verified.",
+      "enum": [
+        "README.md",
+        "SECURITY.md",
+        ".github/SECURITY.md",
+        "docs/SECURITY.md",
+        "PRIVACY.md",
+        "CONTRIBUTING.md",
+        ".github/CONTRIBUTING.md",
+        "docs/CONTRIBUTING.md",
+        "SUPPORT.md",
+        ".github/SUPPORT.md",
+        "docs/SUPPORT.md",
+        "THREAT_MODEL.md",
+        ".github/THREAT_MODEL.md",
+        "docs/THREAT_MODEL.md",
+        "docs/threat-model.md",
+        "docs/DEPENDENCIES.md"
+      ]
+    },
+    "line": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "sha256": {
+      "description": "Lowercase hex SHA-256. Validators in Python must use re.fullmatch (or \\Z): with re.match or re.search, $ also accepts a trailing newline.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "model_fields_availability_resilience_report": {
+      "enum": [
+        "availability_protection.essential_functions_protected",
+        "availability_protection.post_incident_availability",
+        "dos_resilience.measures_in_place",
+        "network_impact.minimised"
+      ]
+    },
+    "model_fields_cvd_disclosure_report": {
+      "enum": [
+        "cvd_policy.enforced",
+        "cvd_policy.publicly_available",
+        "vulnerability_information_sharing.measures_in_place",
+        "fixed_vulnerability_disclosure.practice_in_place",
+        "fixed_vulnerability_disclosure.content.description_included",
+        "fixed_vulnerability_disclosure.content.affected_product_identification",
+        "fixed_vulnerability_disclosure.content.impacts_included",
+        "fixed_vulnerability_disclosure.content.severity_included",
+        "fixed_vulnerability_disclosure.content.remediation_information"
+      ]
+    },
+    "model_fields_data_protection_report": {
+      "enum": [
+        "access_control.mechanisms_present",
+        "access_control.reports_unauthorised_access",
+        "data_confidentiality.protected",
+        "data_integrity.protected",
+        "data_integrity.reports_corruptions",
+        "data_minimisation.applied"
+      ]
+    },
+    "model_fields_monitoring_lifecycle_report": {
+      "enum": [
+        "activity_monitoring.recording_enabled",
+        "activity_monitoring.covers_data_services_functions_access",
+        "activity_monitoring.user_opt_out_mechanism",
+        "data_lifecycle.secure_permanent_removal"
+      ]
+    },
+    "model_fields_secure_config_report": {
+      "enum": [
+        "secure_configuration.secure_by_default",
+        "secure_configuration.reset_to_original_supported",
+        "security_updates_capability.updates_mechanism"
+      ]
+    },
+    "model_fields_secure_design_report": {
+      "enum": [
+        "risk_based_design.process_applied",
+        "risk_based_design.risk_assessment_documented",
+        "attack_surface.limited",
+        "attack_surface.external_interfaces_covered",
+        "exploitation_mitigation.mechanisms_in_place"
+      ]
+    },
+    "model_fields_security_testing_report": {
+      "enum": [
+        "security_testing.reviews_applied",
+        "update_distribution.timely_remediation_ensured"
+      ]
+    },
+    "model_fields_third_party_components_report": {
+      "enum": [
+        "due_diligence.process_documented",
+        "component_vulnerabilities.upstream_reporting_defined",
+        "component_vulnerabilities.remediation_per_annex1_part2",
+        "component_vulnerabilities.fix_sharing_commitment"
+      ]
+    },
+    "model_fields_user_information_report": {
+      "enum": [
+        "manufacturer_identification.identity_and_contact_provided",
+        "manufacturer_identification.product_unique_identification",
+        "security_information.cvd_policy_location_published",
+        "security_information.intended_purpose_and_security_properties",
+        "security_information.foreseeable_misuse_risks_documented",
+        "conformity_and_support.support_type_and_end_date_published",
+        "user_instructions.commissioning_secure_use",
+        "user_instructions.security_impact_of_changes",
+        "user_instructions.update_installation",
+        "user_instructions.secure_decommissioning_data_removal",
+        "user_instructions.auto_update_optout_instructions"
+      ]
+    }
+  }
+}

@@ -1,0 +1,5 @@
+# The pushing repository's own advisories form, in three spellings: never a contact.
+Contact: https://github.com/example-org/example-repo/security/advisories/new
+contact: HTTPS://WWW.GitHub.com/Example-Org/Example-Repo/Security/Advisories/New/
+Contact: http://github.com/example-org/example-repo/security/advisories/new/
+Expires: 2099-01-01T00:00:00.000Z

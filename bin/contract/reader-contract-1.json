@@ -1,0 +1,352 @@
+{
+  "categories": {
+    "availability_resilience_report": {
+      "detector_fields": [],
+      "leaves": {
+        "availability_protection.essential_functions_protected": null,
+        "availability_protection.post_incident_availability": null,
+        "dos_resilience.measures_in_place": null,
+        "network_impact.minimised": null
+      },
+      "model_fields": [
+        "availability_protection.essential_functions_protected",
+        "availability_protection.post_incident_availability",
+        "dos_resilience.measures_in_place",
+        "network_impact.minimised"
+      ],
+      "pending_fields": [],
+      "scan_fields": [],
+      "state": "ready"
+    },
+    "cvd_disclosure_report": {
+      "detector_fields": [
+        "cvd_policy.in_place",
+        "vulnerability_information_sharing.reporting_contact_address_provided"
+      ],
+      "leaves": {
+        "cvd_policy.enforced": null,
+        "cvd_policy.in_place": null,
+        "cvd_policy.publicly_available": null,
+        "fixed_vulnerability_disclosure.content.affected_product_identification": null,
+        "fixed_vulnerability_disclosure.content.description_included": null,
+        "fixed_vulnerability_disclosure.content.impacts_included": null,
+        "fixed_vulnerability_disclosure.content.remediation_information": null,
+        "fixed_vulnerability_disclosure.content.severity_included": null,
+        "fixed_vulnerability_disclosure.delay_exception_invoked": false,
+        "fixed_vulnerability_disclosure.practice_in_place": null,
+        "vulnerability_information_sharing.measures_in_place": null,
+        "vulnerability_information_sharing.reporting_contact_address_provided": null
+      },
+      "model_fields": [
+        "cvd_policy.enforced",
+        "cvd_policy.publicly_available",
+        "vulnerability_information_sharing.measures_in_place",
+        "fixed_vulnerability_disclosure.practice_in_place",
+        "fixed_vulnerability_disclosure.content.description_included",
+        "fixed_vulnerability_disclosure.content.affected_product_identification",
+        "fixed_vulnerability_disclosure.content.impacts_included",
+        "fixed_vulnerability_disclosure.content.severity_included",
+        "fixed_vulnerability_disclosure.content.remediation_information"
+      ],
+      "pending_fields": [],
+      "scan_fields": [],
+      "state": "ready"
+    },
+    "data_protection_report": {
+      "detector_fields": [],
+      "leaves": {
+        "access_control.mechanisms_present": null,
+        "access_control.reports_unauthorised_access": null,
+        "data_confidentiality.protected": null,
+        "data_integrity.protected": null,
+        "data_integrity.reports_corruptions": null,
+        "data_minimisation.applied": null
+      },
+      "model_fields": [
+        "access_control.mechanisms_present",
+        "access_control.reports_unauthorised_access",
+        "data_confidentiality.protected",
+        "data_integrity.protected",
+        "data_integrity.reports_corruptions",
+        "data_minimisation.applied"
+      ],
+      "pending_fields": [],
+      "scan_fields": [],
+      "state": "ready"
+    },
+    "monitoring_lifecycle_report": {
+      "detector_fields": [],
+      "leaves": {
+        "activity_monitoring.covers_data_services_functions_access": null,
+        "activity_monitoring.recording_enabled": null,
+        "activity_monitoring.user_opt_out_mechanism": null,
+        "data_lifecycle.secure_permanent_removal": null,
+        "data_lifecycle.secure_transfer": false,
+        "data_lifecycle.transfer_applicable": true,
+        "market_availability.no_known_exploitable_vulnerabilities": null
+      },
+      "model_fields": [
+        "activity_monitoring.recording_enabled",
+        "activity_monitoring.covers_data_services_functions_access",
+        "activity_monitoring.user_opt_out_mechanism",
+        "data_lifecycle.secure_permanent_removal"
+      ],
+      "pending_fields": [
+        "data_lifecycle.transfer_applicable",
+        "data_lifecycle.secure_transfer"
+      ],
+      "scan_fields": [
+        "market_availability.no_known_exploitable_vulnerabilities"
+      ],
+      "state": "needs_person"
+    },
+    "secure_config_report": {
+      "detector_fields": [],
+      "leaves": {
+        "secure_configuration.reset_to_original_supported": null,
+        "secure_configuration.secure_by_default": null,
+        "secure_configuration.tailor_made_agreement": false,
+        "security_updates_capability.auto_updates.applicability_assessed": true,
+        "security_updates_capability.auto_updates.applicable": true,
+        "security_updates_capability.auto_updates.default_enabled": false,
+        "security_updates_capability.auto_updates.installed_within_appropriate_timeframe": false,
+        "security_updates_capability.auto_updates.opt_out_mechanism": false,
+        "security_updates_capability.auto_updates.postpone_option": false,
+        "security_updates_capability.auto_updates.user_notification": false,
+        "security_updates_capability.updates_mechanism": null
+      },
+      "model_fields": [
+        "secure_configuration.secure_by_default",
+        "secure_configuration.reset_to_original_supported",
+        "security_updates_capability.updates_mechanism"
+      ],
+      "pending_fields": [
+        "secure_configuration.tailor_made_agreement",
+        "security_updates_capability.auto_updates.applicability_assessed",
+        "security_updates_capability.auto_updates.applicable",
+        "security_updates_capability.auto_updates.installed_within_appropriate_timeframe",
+        "security_updates_capability.auto_updates.default_enabled",
+        "security_updates_capability.auto_updates.opt_out_mechanism",
+        "security_updates_capability.auto_updates.user_notification",
+        "security_updates_capability.auto_updates.postpone_option"
+      ],
+      "scan_fields": [],
+      "state": "needs_person"
+    },
+    "secure_design_report": {
+      "detector_fields": [],
+      "leaves": {
+        "attack_surface.external_interfaces_covered": null,
+        "attack_surface.limited": null,
+        "exploitation_mitigation.mechanisms_in_place": null,
+        "risk_based_design.process_applied": null,
+        "risk_based_design.risk_assessment_documented": null
+      },
+      "model_fields": [
+        "risk_based_design.process_applied",
+        "risk_based_design.risk_assessment_documented",
+        "attack_surface.limited",
+        "attack_surface.external_interfaces_covered",
+        "exploitation_mitigation.mechanisms_in_place"
+      ],
+      "pending_fields": [],
+      "scan_fields": [],
+      "state": "ready"
+    },
+    "security_testing_report": {
+      "detector_fields": [
+        "security_testing.tests_applied",
+        "security_testing.regular_cadence_defined",
+        "update_distribution.secure_mechanisms_in_place"
+      ],
+      "leaves": {
+        "security_testing.regular_cadence_defined": null,
+        "security_testing.reviews_applied": null,
+        "security_testing.tests_applied": null,
+        "update_distribution.automatic_distribution.applicability_assessed": true,
+        "update_distribution.automatic_distribution.applicable": true,
+        "update_distribution.automatic_distribution.automatic_manner_provided": false,
+        "update_distribution.secure_mechanisms_in_place": null,
+        "update_distribution.timely_remediation_ensured": null
+      },
+      "model_fields": [
+        "security_testing.reviews_applied",
+        "update_distribution.timely_remediation_ensured"
+      ],
+      "pending_fields": [
+        "update_distribution.automatic_distribution.applicability_assessed",
+        "update_distribution.automatic_distribution.applicable",
+        "update_distribution.automatic_distribution.automatic_manner_provided"
+      ],
+      "scan_fields": [],
+      "state": "needs_person"
+    },
+    "security_updates_policy": {
+      "detector_fields": [],
+      "leaves": null,
+      "model_fields": [],
+      "pending_fields": [
+        "policy.product_placed_on_market_at",
+        "policy.support_period_end_at",
+        "policy.expected_use_less_than_5y",
+        "policy.updates_free_of_charge",
+        "policy.updates_disseminated_without_delay",
+        "policy.advisory_messages_provided",
+        "policy.updates_retention_years",
+        "policy.separation_from_functionality.technically_feasible",
+        "policy.separation_from_functionality.provided_separately"
+      ],
+      "scan_fields": [],
+      "state": "needs_person"
+    },
+    "third_party_components_report": {
+      "detector_fields": [
+        "due_diligence.applies_to_open_source"
+      ],
+      "leaves": {
+        "component_vulnerabilities.fix_sharing_commitment": null,
+        "component_vulnerabilities.remediation_per_annex1_part2": null,
+        "component_vulnerabilities.upstream_reporting_defined": null,
+        "due_diligence.applies_to_open_source": null,
+        "due_diligence.process_documented": null
+      },
+      "model_fields": [
+        "due_diligence.process_documented",
+        "component_vulnerabilities.upstream_reporting_defined",
+        "component_vulnerabilities.remediation_per_annex1_part2",
+        "component_vulnerabilities.fix_sharing_commitment"
+      ],
+      "pending_fields": [],
+      "scan_fields": [],
+      "state": "ready"
+    },
+    "user_information_report": {
+      "detector_fields": [
+        "security_information.vulnerability_contact_point"
+      ],
+      "leaves": {
+        "conformity_and_support.doc_address_applicable": true,
+        "conformity_and_support.doc_internet_address_provided": false,
+        "conformity_and_support.support_period_consistent_with_policy": false,
+        "conformity_and_support.support_type_and_end_date_published": null,
+        "manufacturer_identification.identity_and_contact_provided": null,
+        "manufacturer_identification.product_unique_identification": null,
+        "security_information.cvd_policy_location_published": null,
+        "security_information.foreseeable_misuse_risks_documented": null,
+        "security_information.intended_purpose_and_security_properties": null,
+        "security_information.vulnerability_contact_point": null,
+        "user_instructions.auto_update_optout_instructions": null,
+        "user_instructions.commissioning_secure_use": null,
+        "user_instructions.integration_applicable": true,
+        "user_instructions.integrator_information_provided": false,
+        "user_instructions.sbom_disclosure_decided": true,
+        "user_instructions.sbom_location_provided": false,
+        "user_instructions.secure_decommissioning_data_removal": null,
+        "user_instructions.security_impact_of_changes": null,
+        "user_instructions.update_installation": null
+      },
+      "model_fields": [
+        "manufacturer_identification.identity_and_contact_provided",
+        "manufacturer_identification.product_unique_identification",
+        "security_information.cvd_policy_location_published",
+        "security_information.intended_purpose_and_security_properties",
+        "security_information.foreseeable_misuse_risks_documented",
+        "conformity_and_support.support_type_and_end_date_published",
+        "user_instructions.commissioning_secure_use",
+        "user_instructions.security_impact_of_changes",
+        "user_instructions.update_installation",
+        "user_instructions.secure_decommissioning_data_removal",
+        "user_instructions.auto_update_optout_instructions"
+      ],
+      "pending_fields": [
+        "conformity_and_support.doc_address_applicable",
+        "conformity_and_support.doc_internet_address_provided",
+        "conformity_and_support.support_period_consistent_with_policy",
+        "user_instructions.integration_applicable",
+        "user_instructions.integrator_information_provided",
+        "user_instructions.sbom_disclosure_decided",
+        "user_instructions.sbom_location_provided"
+      ],
+      "scan_fields": [],
+      "state": "needs_person"
+    }
+  },
+  "contract": 1,
+  "derived_from": "reader contract 1, Seetrex repository commit 8f4e1ac5 (crates/compliance/reader/contract), by tests/fixtures/contract/derive.jq",
+  "detector_ids": [
+    "dependency_review_step",
+    "dependency_update_config",
+    "security_policy_file",
+    "security_contact",
+    "security_analyzer_step",
+    "scheduled_security_analysis",
+    "release_provenance_step",
+    "threat_model_file",
+    "supported_versions_table",
+    "codeowners_file"
+  ],
+  "detector_targets": {
+    "codeowners_file": [],
+    "dependency_review_step": [
+      {
+        "category": "third_party_components_report",
+        "field": "due_diligence.applies_to_open_source"
+      }
+    ],
+    "dependency_update_config": [],
+    "release_provenance_step": [
+      {
+        "category": "security_testing_report",
+        "field": "update_distribution.secure_mechanisms_in_place"
+      }
+    ],
+    "scheduled_security_analysis": [
+      {
+        "category": "security_testing_report",
+        "field": "security_testing.regular_cadence_defined"
+      }
+    ],
+    "security_analyzer_step": [
+      {
+        "category": "security_testing_report",
+        "field": "security_testing.tests_applied"
+      }
+    ],
+    "security_contact": [
+      {
+        "category": "cvd_disclosure_report",
+        "field": "vulnerability_information_sharing.reporting_contact_address_provided"
+      },
+      {
+        "category": "user_information_report",
+        "field": "security_information.vulnerability_contact_point"
+      }
+    ],
+    "security_policy_file": [
+      {
+        "category": "cvd_disclosure_report",
+        "field": "cvd_policy.in_place"
+      }
+    ],
+    "supported_versions_table": [],
+    "threat_model_file": []
+  },
+  "model_documents": [
+    "README.md",
+    "SECURITY.md",
+    ".github/SECURITY.md",
+    "docs/SECURITY.md",
+    "PRIVACY.md",
+    "CONTRIBUTING.md",
+    ".github/CONTRIBUTING.md",
+    "docs/CONTRIBUTING.md",
+    "SUPPORT.md",
+    ".github/SUPPORT.md",
+    "docs/SUPPORT.md",
+    "THREAT_MODEL.md",
+    ".github/THREAT_MODEL.md",
+    "docs/THREAT_MODEL.md",
+    "docs/threat-model.md",
+    "docs/DEPENDENCIES.md"
+  ]
+}

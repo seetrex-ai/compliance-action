@@ -1,0 +1,25 @@
+name: commented
+on:
+  push:
+  # schedule:
+  #   - cron: "0 3 * * 1"
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      # - uses: github/codeql-action/analyze@0123456789abcdef0123456789abcdef01234567
+      #- run: trivy fs .
+      # - uses: actions/dependency-review-action@0123456789abcdef0123456789abcdef01234567
+      # - uses: actions/attest-build-provenance@0123456789abcdef0123456789abcdef01234567
+      - name: build
+        run: |
+          npm ci
+          # npm audit --audit-level=high
+          # then: npm ci && npm audit --audit-level=high
+          # cosign sign --yes example.invalid/app
+          npm run build
+      - run: echo building # && trivy fs .
+      - name: later
+        run: |
+          npm ci  # later: && npm audit

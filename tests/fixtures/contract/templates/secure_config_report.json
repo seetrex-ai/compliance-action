@@ -1,0 +1,24 @@
+{
+  "schema": "seetrex.attestation.v2",
+  "category": "secure_config_report",
+  "attested_via": "person",
+  "payload": {
+    "secure_configuration": {
+      "secure_by_default": false,
+      "tailor_made_agreement": false,
+      "reset_to_original_supported": false
+    },
+    "security_updates_capability": {
+      "updates_mechanism": false,
+      "auto_updates": {
+        "applicability_assessed": false,
+        "applicable": false,
+        "installed_within_appropriate_timeframe": false,
+        "default_enabled": false,
+        "opt_out_mechanism": false,
+        "user_notification": false,
+        "postpone_option": false
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schema": "seetrex.attestation.v2",
+  "category": "data_protection_report",
+  "attested_via": "person",
+  "payload": {
+    "access_control": {
+      "mechanisms_present": false,
+      "reports_unauthorised_access": false
+    },
+    "data_confidentiality": {
+      "protected": false
+    },
+    "data_integrity": {
+      "protected": false,
+      "reports_corruptions": false
+    },
+    "data_minimisation": {
+      "applied": false
+    }
+  }
+}

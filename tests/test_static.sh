@@ -414,11 +414,15 @@ test_intent_public_texts_avoid_the_closed_list_of_claims() {
   # "non-compliant"), exclusivity ("nobody else", "no one else"), a retention
   # or a publication of results ("retained", "we keep your", "publish if you
   # want", "Trust Center"), or an unqualified offline guarantee ("verifiable
-  # offline", "tamper-proof"). The list is closed, case insensitive, and read
-  # as plain text; a phrase the README needs in a negation ("no badge", "the
-  # only credential") is not on it.
+  # offline", "tamper-proof"), nor, since the proposal step, a claim on what
+  # the reader is ("verified", "AI-powered", "no model participates", "each
+  # fact is signed by a person": a model proposes, a person commits). The
+  # list is closed, case insensitive, and read as plain text; a phrase the
+  # README needs in a negation ("no badge", "the only credential") is not on
+  # it.
   # CONTEXT: external audit E of 2026-11-04 (C1, I1-I5) and plan E2+V2-b §5:
-  # the same list guards the presentation script.
+  # the same list guards the presentation script; plan R4 §5 and amendment
+  # #334 point 6 for the reader's phrases.
   # EXPIRES IF: the service starts making one of these claims for real, with
   # its measure; then the phrase leaves the list in the same commit.
   _static_action_files
@@ -433,7 +437,9 @@ test_intent_public_texts_avoid_the_closed_list_of_claims() {
     'nobody else' 'no one else' \
     'is retained' 'are retained' 'we keep your' 'we retain' \
     'publish if you want' 'Trust Center' \
-    'verifiable offline' 'tamper-proof' 'tamperproof'; do
+    'verifiable offline' 'tamper-proof' 'tamperproof' \
+    'compliant' 'verified' 'AI-powered' \
+    'no model participates' 'each fact is signed by a person'; do
     needle="$(printf '%s' "$phrase" | tr '[:upper:]' '[:lower:]')"
     for f in readme action; do
       rc=0
@@ -441,5 +447,31 @@ test_intent_public_texts_avoid_the_closed_list_of_claims() {
       [ "$rc" -le 1 ] || fail "$f: grep failed (rc=$rc) on the phrase [$phrase]"
       assert_eq 0 "${hits%$'\r'}" "$f: carries the phrase [$phrase]"
     done
+  done
+}
+
+test_intent_public_texts_never_name_the_model_provider() {
+  # INTENT: no file of this public repository names the model provider or a
+  # model of its: the README and the data policy say "an external LLM
+  # provider", a category of recipient, never a brand. The names are kept
+  # here base64-encoded so that this file does not carry them either; each
+  # is matched case insensitively as a substring of every file of the tree.
+  # CONTEXT: amendment #334 point 6 (founder, 2026-11-09) and plan R4 §5:
+  # "an external LLM provider", without a brand, in README, policy, tests and
+  # public comments.
+  # EXPIRES IF: the founder decides to name the provider publicly; then the
+  # names leave this list in the same commit as the README sentence.
+  _static_action_files
+  local enc name pat rc hits
+  for enc in YW50aHJvcGlj Y2xhdWRl b3B1cw== c29ubmV0 aGFpa3U=; do
+    name="$(printf '%s' "$enc" | base64 -d | tr -d '\r')"
+    [ -n "$name" ] || fail "a provider name did not decode"
+    # [aA][nN]... : case insensitive without grep -i (see the test above).
+    pat="$(printf '%s' "$name" | sed 's/./[\U&\L&]/g')"
+    [ "$pat" != "$name" ] || fail "the case-insensitive pattern was not built"
+    rc=0
+    hits="$(grep -r -l -a -E --exclude-dir=.git --exclude=.git -- "$pat" "$ACTION_ROOT")" || rc=$?
+    [ "$rc" -le 1 ] || fail "grep failed (rc=$rc) on a provider name"
+    assert_eq "" "${hits%$'\r'}" "files naming the model provider or one of its models"
   done
 }

@@ -1,0 +1,17 @@
+{
+  "schema": "seetrex.attestation.v2",
+  "category": "availability_resilience_report",
+  "attested_via": "person",
+  "payload": {
+    "availability_protection": {
+      "essential_functions_protected": false,
+      "post_incident_availability": false
+    },
+    "dos_resilience": {
+      "measures_in_place": false
+    },
+    "network_impact": {
+      "minimised": false
+    }
+  }
+}
